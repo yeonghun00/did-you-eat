@@ -16,7 +16,7 @@ void main() {
     await tester.pumpWidget(const LoveEverydayApp());
 
     // Verify that our app shows the splash screen initially
-    expect(find.text('사랑해요'), findsOneWidget);
+    expect(find.text('식사하셨어요?'), findsOneWidget);
     expect(find.text('부모님과 함께하는 따뜻한 연결'), findsOneWidget);
   });
 }

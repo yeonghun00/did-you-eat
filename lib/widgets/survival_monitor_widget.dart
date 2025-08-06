@@ -48,48 +48,91 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
         }
 
         final data = snapshot.data!;
-        final lastActivity = data['lastActivity'] as Timestamp?;
+        final todayMealCount = data['todayMealCount'] as int? ?? 0;
         final survivalAlert = data['survivalAlert'] as Map<String, dynamic>?;
-        final foodAlert = data['foodAlert'] as Map<String, dynamic>?;
         final elderlyName = data['elderlyName'] as String? ?? '';
-        final isActive = data['isActive'] as bool? ?? false;
-        final lastFoodIntake = data['lastFoodIntake'] as Map<String, dynamic>?;
+        final lastPhoneActivity = data['lastPhoneActivity'] as dynamic; // General phone activity
+        final lastActive = data['lastActive'] as dynamic; // Our specific app usage
         final location = data['location'] as Map<String, dynamic>?;
+        final settings = data['settings'] as Map<String, dynamic>?;
+        
+        // Get survival alert hours setting (default: 12 hours)
+        final survivalAlertHours = settings?['survivalAlertHours'] as int? ?? 12;
 
-        // Calculate hours since last phone usage
-        final hoursSinceActivity = lastActivity != null
-            ? DateTime.now().difference(lastActivity.toDate()).inHours
-            : 999;
+        // Check survival alert status (handled by parent app's native monitoring)
+        final isSurvivalAlertActive = survivalAlert?['isActive'] as bool? ?? false;
 
-        // Determine status
+        // Parse lastPhoneActivity timestamp (for survival monitoring)
+        DateTime? lastPhoneActivityTime;
+        if (lastPhoneActivity != null) {
+          try {
+            if (lastPhoneActivity is Timestamp) {
+              lastPhoneActivityTime = lastPhoneActivity.toDate();
+            } else if (lastPhoneActivity is String) {
+              lastPhoneActivityTime = DateTime.parse(lastPhoneActivity);
+            }
+          } catch (e) {
+            print('Error parsing lastPhoneActivity: $e');
+          }
+        }
+
+        // Determine status based on actual activity data
         String status;
         Color statusColor;
         IconData statusIcon;
 
-        if (survivalAlert?['isActive'] == true) {
-          status = '🚨 12시간 이상 활동 없음';
+        if (isSurvivalAlertActive) {
+          final alertMessage = survivalAlert?['message'] as String? ?? '장시간 활동 없음';
+          status = '🚨 $alertMessage';
           statusColor = Colors.red;
           statusIcon = Icons.emergency;
-        } else if (!isActive) {
-          status = '📱 앱이 비활성화됨';
+        } else if (lastPhoneActivityTime == null) {
+          status = '📱 안전 상태 확인 중';
           statusColor = Colors.grey;
           statusIcon = Icons.mobile_off;
-        } else if (hoursSinceActivity < 2) {
-          status = '✅ 최근 활동 (${hoursSinceActivity}시간 전)';
-          statusColor = AppColors.normalGreen;
-          statusIcon = Icons.check_circle;
-        } else if (hoursSinceActivity < 6) {
-          status = '⚠️ ${hoursSinceActivity}시간 전 마지막 활동';
-          statusColor = AppColors.cautionOrange;
-          statusIcon = Icons.warning;
-        } else if (hoursSinceActivity < 12) {
-          status = '⚠️ ${hoursSinceActivity}시간 이상 활동 없음';
-          statusColor = AppColors.warningRed;
-          statusIcon = Icons.error;
         } else {
-          status = '🚨 ${hoursSinceActivity}시간 이상 활동 없음';
-          statusColor = Colors.red;
-          statusIcon = Icons.emergency;
+          final now = DateTime.now();
+          final inactiveMinutes = now.difference(lastPhoneActivityTime).inMinutes;
+          
+          // Calculate thresholds based on user settings
+          final redThresholdMinutes = survivalAlertHours * 60; // Convert hours to minutes
+          final orangeThresholdMinutes = redThresholdMinutes - 60; // 1 hour before red threshold
+          
+          if (inactiveMinutes >= redThresholdMinutes) {
+            // Red: At or past the survival alert threshold
+            final hours = (inactiveMinutes / 60).floor();
+            final remainingMinutes = inactiveMinutes % 60;
+            String timeStr = hours > 0 
+                ? '${hours}시간${remainingMinutes > 0 ? ' ${remainingMinutes}분' : ''}'
+                : '${inactiveMinutes}분';
+            status = '🚨 $timeStr째 휴대폰 미사용 - 위험';
+            statusColor = AppColors.warningRed;
+            statusIcon = Icons.warning;
+          } else if (inactiveMinutes >= orangeThresholdMinutes && orangeThresholdMinutes > 0) {
+            // Orange: 1 hour before the red threshold
+            final remainingMinutes = redThresholdMinutes - inactiveMinutes;
+            final remainingHours = (remainingMinutes / 60).floor();
+            final remainingMins = remainingMinutes % 60;
+            String timeStr = remainingHours > 0 
+                ? '${remainingHours}시간${remainingMins > 0 ? ' ${remainingMins}분' : ''}'
+                : '${remainingMinutes}분';
+            status = '⏰ 주의 - $timeStr 후 위험 단계';
+            statusColor = AppColors.cautionOrange;
+            statusIcon = Icons.schedule;
+          } else {
+            // Green: Safe zone
+            final hours = (inactiveMinutes / 60).floor();
+            final remainingMinutes = inactiveMinutes % 60;
+            String timeStr;
+            if (hours > 0) {
+              timeStr = '${hours}시간${remainingMinutes > 0 ? ' ${remainingMinutes}분' : ''}';
+            } else {
+              timeStr = '${inactiveMinutes}분';
+            }
+            status = '✅ 안전하게 지내고 계세요 ($timeStr 전 사용)';
+            statusColor = AppColors.normalGreen;
+            statusIcon = Icons.check_circle;
+          }
         }
 
         return Container(
@@ -143,7 +186,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '$elderlyName님 생존 신호',
+                            '$elderlyName님 안전 상태',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -152,7 +195,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            '활동 모니터링',
+                            '가족 안심 서비스',
                             style: TextStyle(
                               fontSize: 14,
                               color: AppColors.lightText,
@@ -184,43 +227,16 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (lastActivity != null) ...[
+                      if (lastPhoneActivityTime != null) ...[
                         const SizedBox(height: 8),
                         Text(
-                          '마지막 활동: ${_formatTimestamp(lastActivity.toDate())}',
+                          '마지막 휴대폰 사용: ${_formatDetailedTimestamp(lastPhoneActivityTime!)}',
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize: 12,
                             color: AppColors.lightText,
                           ),
                         ),
                       ],
-                      // Food alert display
-                      if (foodAlert?['isActive'] == true) ...{
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.restaurant, size: 16, color: Colors.orange),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  foodAlert!['message']?.toString() ?? '식사 알림',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.orange,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      },
                       
                       // Survival alert display
                       if (survivalAlert?['message'] != null && 
@@ -247,7 +263,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                 ),
                 
                 // Clear alert buttons
-                if (survivalAlert?['isActive'] == true || foodAlert?['isActive'] == true) ...{
+                if (survivalAlert?['isActive'] == true) ...{
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -260,7 +276,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                                 if (success && mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                      content: Text('생존 알림을 확인했습니다.'),
+                                      content: Text('안전 상태를 확인했습니다.'),
                                       backgroundColor: Colors.green,
                                     ),
                                   );
@@ -269,7 +285,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                      content: Text('알림 확인에 실패했습니다.'),
+                                      content: Text('안전 확인에 실패했습니다.'),
                                       backgroundColor: Colors.red,
                                     ),
                                   );
@@ -278,7 +294,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                             },
                             icon: const Icon(Icons.check_circle, color: Colors.white),
                             label: const Text(
-                              '생존 알림 확인',
+                              '안전 확인 완료',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
@@ -294,82 +310,10 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                           ),
                         ),
                       },
-                      if (survivalAlert?['isActive'] == true && foodAlert?['isActive'] == true)
-                        const SizedBox(width: 8),
-                      if (foodAlert?['isActive'] == true) ...{
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () async {
-                              try {
-                                final success = await _childService.clearFoodAlert(widget.familyCode);
-                                if (success && mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('식사 알림을 확인했습니다.'),
-                                      backgroundColor: Colors.green,
-                                    ),
-                                  );
-                                }
-                              } catch (e) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('알림 확인에 실패했습니다.'),
-                                      backgroundColor: Colors.red,
-                                    ),
-                                  );
-                                }
-                              }
-                            },
-                            icon: const Icon(Icons.restaurant, color: Colors.white),
-                            label: const Text(
-                              '식사 알림 확인',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                      },
                     ],
                   ),
                 },
                 
-                // Food intake status
-                if (lastFoodIntake != null) ...{
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.restaurant, size: 16, color: Colors.green),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '오늘 ${lastFoodIntake!['todayCount'] ?? 0}회 식사${lastFoodIntake!['timestamp'] != null ? ' | ${_formatTimestamp(lastFoodIntake!['timestamp'] is Timestamp ? (lastFoodIntake!['timestamp'] as Timestamp).toDate() : DateTime.parse(lastFoodIntake!['timestamp'].toString()))}' : ''}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.green,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                },
                 
                 // Location info (simplified - map moved to separate widget)
                 if (location != null && 
@@ -388,7 +332,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            '위치: ${location!['address'] ?? '위치 정보 없음'}${location!['timestamp'] != null ? ' | ${_formatTimestamp(location!['timestamp'] is Timestamp ? (location!['timestamp'] as Timestamp).toDate() : DateTime.parse(location!['timestamp'].toString()))}' : ''}',
+                            '현재 위치: ${location!['address'] ?? '위치 공유 준비 중'}${location!['timestamp'] != null ? ' | ${_formatTimestamp(location!['timestamp'] is Timestamp ? (location!['timestamp'] as Timestamp).toDate() : DateTime.parse(location!['timestamp'].toString()))}' : ''}',
                             style: const TextStyle(
                               fontSize: 12,
                               color: Colors.blue,
@@ -420,7 +364,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          '앱 사용, 화면 켜짐 등의 활동을 모니터링합니다.',
+                          '가족이 안심할 수 있도록 안전 상태를 공유합니다.',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppColors.primaryBlue,
@@ -507,6 +451,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
     );
   }
 
+
   String _formatTimestamp(DateTime dateTime) {
     final now = DateTime.now();
     final difference = now.difference(dateTime);
@@ -521,5 +466,26 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
       return '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')} '
              '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
     }
+  }
+
+  String _formatDetailedTimestamp(DateTime dateTime) {
+    // Format: "July 26, 2025 at 3:22:15 PM UTC+9"
+    const months = [
+      '', 'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    
+    final month = months[dateTime.month];
+    final day = dateTime.day;
+    final year = dateTime.year;
+    
+    final hour = dateTime.hour;
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    final second = dateTime.second.toString().padLeft(2, '0');
+    
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    
+    return '$month $day, $year at $displayHour:$minute:$second $period UTC+9';
   }
 }

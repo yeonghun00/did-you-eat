@@ -1,21 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 import 'screens/family_setup_screen.dart';
 import 'screens/home_screen.dart';
-import 'screens/history_screen.dart';
-import 'screens/notifications_screen.dart';
-import 'screens/settings_screen.dart';
 import 'screens/account_deleted_screen.dart';
-import 'services/firebase_service.dart';
+import 'screens/auth/login_screen.dart';
 import 'services/child_app_service.dart';
 import 'services/fcm_message_service.dart';
 import 'services/fcm_token_service.dart';
+import 'services/auth_service.dart';
 import 'models/family_record.dart';
 import 'theme/app_theme.dart';
-import 'constants/colors.dart';
+import 'utils/app_lifecycle_handler.dart';
+import 'utils/connectivity_checker.dart';
 
 void main() {
   runApp(const LoveEverydayApp());
@@ -27,7 +25,7 @@ class LoveEverydayApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '식사 기록',
+      title: '식사하셨어요?',
       theme: AppTheme.lightTheme,
       home: const FirebaseInitWrapper(),
       debugShowCheckedModeBanner: false,
@@ -46,6 +44,8 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
   bool _isInitialized = false;
   bool _hasError = false;
   String _errorMessage = '';
+  final AppLifecycleHandler _lifecycleHandler = AppLifecycleHandler();
+  final ConnectivityChecker _connectivityChecker = ConnectivityChecker();
 
   @override
   void initState() {
@@ -53,9 +53,29 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
     _initializeFirebase();
   }
 
+  @override
+  void dispose() {
+    _lifecycleHandler.dispose();
+    _connectivityChecker.dispose();
+    super.dispose();
+  }
+
   Future<void> _initializeFirebase() async {
     try {
       WidgetsFlutterBinding.ensureInitialized();
+      
+      // Check network connectivity first
+      final connectivityStatus = await _connectivityChecker.checkConnectivity();
+      if (connectivityStatus == ConnectivityStatus.disconnected) {
+        print('No network connection, waiting for connectivity...');
+        final hasConnection = await _connectivityChecker.waitForConnection(
+          timeout: const Duration(seconds: 15),
+        );
+        if (!hasConnection) {
+          throw Exception('No network connection available');
+        }
+      }
+      
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
       // Initialize FCM message service
@@ -74,13 +94,12 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
         print('⚠️ FCM initialization failed: $e');
       }
 
-      // Anonymous authentication
-      try {
-        final userCredential = await FirebaseAuth.instance.signInAnonymously();
-        print('Anonymous authentication successful: ${userCredential.user?.uid}');
-      } catch (e) {
-        print('Anonymous authentication failed: $e');
-      }
+      // FCM and Firebase are now initialized
+      // Authentication will be handled by AuthWrapper
+
+      // Initialize other services after Firebase is ready
+      _lifecycleHandler.initialize();
+      _connectivityChecker.initialize();
 
       setState(() {
         _isInitialized = true;
@@ -178,102 +197,335 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
       );
     }
 
-    return const SplashScreen();
+    return const AuthWrapper();
   }
 }
 
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+// AuthWrapper handles authentication state and routing with error recovery
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  State<AuthWrapper> createState() => _AuthWrapperState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _AuthWrapperState extends State<AuthWrapper> {
+  final AuthService _authService = AuthService();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: _authService.authStateChanges,
+      builder: (context, snapshot) {
+        // Show loading while checking auth state
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SplashScreen();
+        }
+        
+        // Handle connection errors or auth failures
+        if (snapshot.hasError) {
+          print('Auth stream error: ${snapshot.error}');
+          return _buildErrorRecoveryWidget(snapshot.error.toString());
+        }
+        
+        // User is signed in and valid
+        if (snapshot.hasData && snapshot.data != null) {
+          final user = snapshot.data!;
+          
+          // Check if user is properly authenticated (not anonymous)
+          if (user.isAnonymous) {
+            print('⚠️ WARNING: User is anonymous, redirecting to login');
+            return const LoginScreen();
+          }
+          
+          print('✅ User properly authenticated: ${user.email ?? user.uid}');
+          return const AuthenticatedApp();
+        }
+        
+        // No user - show login screen (no need for auth recovery with proper auth)
+        return const LoginScreen();
+      },
+    );
+  }
+
+  Widget _buildErrorRecoveryWidget(String error) {
+    return Scaffold(
+      backgroundColor: AppTheme.white,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: AppTheme.primaryBlue,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              '연결 문제 발생',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                '네트워크 연결을 확인하고 다시 시도해주세요.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 14),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                // Restart the app authentication flow
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LoginScreen()),
+                );
+              },
+              child: const Text('다시 시도'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Handles app logic for authenticated users
+class AuthenticatedApp extends StatefulWidget {
+  const AuthenticatedApp({super.key});
+
+  @override
+  State<AuthenticatedApp> createState() => _AuthenticatedAppState();
+}
+
+class _AuthenticatedAppState extends State<AuthenticatedApp> {
   @override
   void initState() {
     super.initState();
     _initializeApp();
   }
 
+  String _extractDeviceInfo(dynamic deviceInfo) {
+    if (deviceInfo is String) {
+      return deviceInfo;
+    } else if (deviceInfo is Map) {
+      return deviceInfo['lastUpdateSource']?.toString() ?? 'Unknown';
+    } else {
+      return 'Unknown';
+    }
+  }
+
   Future<void> _initializeApp() async {
-    // 스플래시 화면 표시 시간
-    await Future.delayed(const Duration(seconds: 2));
+    // Small delay for smooth transition
+    await Future.delayed(const Duration(seconds: 1));
 
     try {
-      // 기존 가족 코드 확인
-      final prefs = await SharedPreferences.getInstance();
-      final familyCode = prefs.getString('family_code');
+      // Check user profile for family codes
+      final authService = AuthService();
+      final currentUser = authService.currentUser;
+      print('🔍 Checking user profile for family codes...');
+      print('👤 Current user: ${currentUser?.email ?? currentUser?.uid ?? 'null'}');
+      
+      final userProfile = await authService.getUserProfile();
+      
+      if (userProfile != null) {
+        print('✅ User profile found: ${userProfile.keys}');
+        print('📊 Full profile data: $userProfile');
+        
+        if (userProfile['familyCodes'] != null) {
+          final familyCodes = List<String>.from(userProfile['familyCodes']);
+          print('📱 Family codes in profile: $familyCodes (count: ${familyCodes.length})');
+          
+          if (familyCodes.isNotEmpty) {
+            // Use the first (most recent) family code
+            final familyCode = familyCodes.first;
+            print('🔑 Using family code: $familyCode');
+            print('💾 Family code CONFIRMED in user profile - should persist across sessions');
+            
+            // Validate family code and check if approved
+            final childService = ChildAppService();
+            final familyExists = await childService.checkFamilyExists(familyCode);
 
-      if (familyCode != null) {
-        // 가족 코드가 있으면 계정 삭제 여부부터 확인
-        final childService = ChildAppService();
-        final familyExists = await childService.checkFamilyExists(familyCode);
-
-        if (!familyExists) {
-          // 가족 계정이 삭제된 경우
-          await prefs.clear(); // 모든 저장된 데이터 삭제
-          Navigator.pushReplacement(
-            context,
-            AppTheme.fadeTransition(page: const AccountDeletedScreen()),
-          );
-          return;
-        }
-
-        // 가족 코드가 존재하면 유효성 검사 (connectionCode를 사용)
-        final familyData = await childService.getFamilyInfo(familyCode);
-
-        if (familyData != null && familyData['approved'] == true) {
-          // 유효하고 승인된 가족 코드이면 홈 화면으로 이동
-          final familyInfo = FamilyInfo.fromMap({
-            'familyCode': familyCode,
-            ...familyData,
-          });
-
-          // Register FCM token for this family
-          final familyId = familyData['familyId'] as String?;
-          if (familyId != null) {
-            Future.delayed(const Duration(seconds: 2), () async {
-              try {
-                final registered = await FCMTokenService.registerChildToken(familyId);
-                if (registered) {
-                  print('✅ FCM token registered for family: $familyId');
-                } else {
-                  print('⚠️ FCM token registration failed');
-                }
-              } catch (e) {
-                print('❌ Failed to register FCM token: $e');
+            if (familyExists == null) {
+              // Network error - show retry dialog instead of account deletion
+              print('⚠️ Network error checking family existence - KEEPING code in profile');
+              print('Family code preserved: $familyCode');
+              if (!mounted) return;
+              final shouldRetry = await _showProfileRetryDialog();
+              
+              if (shouldRetry) {
+                _initializeApp();
+                return;
+              } else {
+                // User chose to re-enter family code - but DON'T remove existing code
+                print('📝 User chose family setup but preserving existing code: $familyCode');
+                Navigator.pushReplacement(
+                  context,
+                  AppTheme.slideTransition(page: const FamilySetupScreen()),
+                );
+                return;
               }
-            });
-          }
+            }
 
-          Navigator.pushReplacement(
-            context,
-            AppTheme.slideTransition(
-              page: HomeScreen(familyCode: familyCode, familyInfo: familyInfo),
-            ),
-          );
-          return;
+            if (familyExists == false) {
+              // Family actually deleted - remove from user profile
+              print('❌ Family was actually deleted by parent app');
+              await authService.removeFamilyCode(familyCode);
+              if (!mounted) return;
+              Navigator.pushReplacement(
+                context,
+                AppTheme.fadeTransition(page: const AccountDeletedScreen()),
+              );
+              return;
+            }
+
+            final familyData = await childService.getFamilyInfo(familyCode);
+            if (familyData != null && familyData['approved'] == true) {
+              // Valid and approved family code
+              print('🔍 Raw family data: $familyData');
+              print('📊 Family data keys: ${familyData.keys.toList()}');
+              print('📊 Family data types: ${familyData.map((key, value) => MapEntry(key, value.runtimeType))}');
+              
+              // Only pass the fields that FamilyInfo constructor expects
+              final familyInfo = FamilyInfo.fromMap({
+                'familyCode': familyCode,
+                'elderlyName': familyData['elderlyName'] ?? '',
+                'createdAt': familyData['createdAt'],
+                'lastMealTime': familyData['lastMealTime'],
+                'isActive': familyData['isActive'] ?? false,
+                'deviceInfo': _extractDeviceInfo(familyData['deviceInfo']),
+              });
+
+              // Register FCM token
+              final familyId = familyData['familyId'] as String?;
+              if (familyId != null) {
+                Future.delayed(const Duration(seconds: 2), () async {
+                  try {
+                    await FCMTokenService.registerChildToken(familyId);
+                  } catch (e) {
+                    // Handle FCM token registration error silently
+                  }
+                });
+              }
+
+              if (!mounted) return;
+
+              Navigator.pushReplacement(
+                context,
+                AppTheme.slideTransition(
+                  page: HomeScreen(familyCode: familyCode, familyInfo: familyInfo),
+                ),
+              );
+              return;
+            } else {
+              // Family code exists but not approved or network error - DON'T remove from profile
+              print('⚠️ Family code exists but not approved or network error - keeping code in profile');
+              print('Family data: $familyData');
+              
+              // Show retry dialog instead of removing family code
+              if (!mounted) return;
+              final shouldRetry = await _showProfileRetryDialog();
+              
+              if (shouldRetry) {
+                _initializeApp();
+                return;
+              }
+              // If user chooses not to retry, go to family setup but DON'T remove code
+            }
+          } else {
+            print('❌ No family codes found in user profile');
+          }
         } else {
-          // 유효하지 않거나 승인되지 않은 가족 코드이면 제거
-          await prefs.remove('family_code');
+          print('❌ familyCodes field is null in user profile');
+        }
+      } else {
+        print('❌ No user profile found - this might be a network issue');
+        
+        // Show retry dialog instead of immediately going to family setup
+        if (!mounted) return;
+        final shouldRetry = await _showProfileRetryDialog();
+        
+        if (shouldRetry) {
+          // Retry initialization
+          _initializeApp();
+          return;
         }
       }
 
-      // 가족 코드가 없거나 유효하지 않으면 설정 화면으로 이동
+      // No valid family code, go to family setup
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         AppTheme.slideTransition(page: const FamilySetupScreen()),
       );
     } catch (e) {
-      print('Error initializing app: $e');
-      // 에러 발생 시 설정 화면으로 이동
+      print('❌ Error during app initialization: $e');
+      
+      // Show retry option for network/connection errors
+      if (!mounted) return;
+      final shouldRetry = await _showProfileRetryDialog();
+      
+      if (shouldRetry) {
+        _initializeApp();
+        return;
+      }
+      
+      // If user chooses not to retry, go to family setup
       Navigator.pushReplacement(
         context,
         AppTheme.fadeTransition(page: const FamilySetupScreen()),
       );
     }
   }
+
+  Future<bool> _showProfileRetryDialog() async {
+    return await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.refresh, color: AppTheme.primaryBlue),
+            const SizedBox(width: 8),
+            const Text('연결 문제'),
+          ],
+        ),
+        content: const Text(
+          '사용자 정보를 불러오는 중 문제가 발생했습니다.\n'
+          '네트워크 연결을 확인하고 다시 시도하시겠습니까?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('가족 코드 재입력'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryBlue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('다시 시도'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const SplashScreen();
+  }
+}
+
+// Splash screen component
+class SplashScreen extends StatelessWidget {
+  const SplashScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -303,7 +555,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
             // 앱 이름
             const Text(
-              '식사 기록',
+              '식사하셨어요?',
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.w700,

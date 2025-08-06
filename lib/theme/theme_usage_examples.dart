@@ -12,7 +12,7 @@ class ThemeUsageExamples {
     required ParentStatus status,
     required String statusMessage,
     required int mealCount,
-    required DateTime? lastActivity,
+    required String? lastMealTime,
   }) {
     return Card(
       margin: const EdgeInsets.all(16),
@@ -95,10 +95,10 @@ class ThemeUsageExamples {
               ),
             ),
 
-            if (lastActivity != null) ...[
+            if (lastMealTime != null) ...[
               const SizedBox(height: 8),
               Text(
-                '마지막 활동: ${_formatTime(lastActivity)}',
+                '마지막 식사: $lastMealTime',
                 style: const TextStyle(fontSize: 14, color: AppTheme.textLight),
               ),
             ],

@@ -1,14 +1,62 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow access to families collection for authenticated users
-    match /families/{familyCode} {
-      allow read, write: if request.auth != null;
-      
-      // Allow access to subcollections within families
-      match /recordings/{document=**} {
-        allow read, write: if request.auth != null;
+    
+    // Users collection - users can only access their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Families collection - enhanced security with user-based access control
+    match /families/{familyId} {
+      // Helper function to check if user has access to this family
+      function hasAccessToFamily() {
+        return request.auth != null && 
+               exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyCodes != null &&
+               resource.data.connectionCode in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyCodes;
       }
+      
+      // Read access: user must be authenticated and have the family's connectionCode in their profile
+      allow read: if hasAccessToFamily();
+      
+      // Write access: more restrictive - only for specific operations
+      allow update: if hasAccessToFamily() && 
+                       // Only allow updating these fields from child app
+                       request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['survivalAlert', 'settings', 'lastChildAppActivity']);
+      
+      // Create/Delete: only authenticated users (for family creation from parent app)
+      allow create: if request.auth != null;
+      allow delete: if request.auth != null && hasAccessToFamily();
+      
+      // Recordings subcollection - read-only for child app users
+      match /recordings/{document=**} {
+        allow read: if hasAccessToFamily();
+        allow write: if request.auth != null; // Parent app can write recordings
+      }
+      
+      // Meals subcollection - read-only for child app users  
+      match /meals/{document=**} {
+        allow read: if hasAccessToFamily();
+        allow write: if request.auth != null; // Parent app can write meals
+      }
+    }
+    
+    // FCM tokens collection for notifications
+    match /fcmTokens/{tokenId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // App analytics and logs (if needed)
+    match /analytics/{document=**} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Global app settings (read-only for users)
+    match /appSettings/{document=**} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only admin can write
     }
   }
 }

@@ -267,8 +267,7 @@ class FirebaseService {
         );
       }
       
-      // 생존 신호 확인 (lastActivity 기반)
-      final lastActivity = familyData['lastActivity'] as Timestamp?;
+      // 생존 신호 확인 (survivalAlert 기반 - parent app native monitoring)
       final survivalAlert = familyData['survivalAlert'] as Map<String, dynamic>?;
       final isActive = familyData['isActive'] as bool? ?? false;
       

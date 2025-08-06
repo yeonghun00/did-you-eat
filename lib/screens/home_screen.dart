@@ -10,8 +10,7 @@ import '../widgets/today_meal_section.dart';
 import '../widgets/survival_monitor_widget.dart';
 import '../widgets/location_card_widget.dart';
 import '../constants/colors.dart';
-import 'history_screen.dart';
-import 'notifications_screen.dart';
+import 'activity_screen.dart';
 import 'settings_screen.dart';
 import 'account_deleted_screen.dart';
 
@@ -34,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   ParentStatusInfo? _statusInfo;
   List<MealRecord> _todayMeals = [];
   bool _isLoading = true;
+  Timer? _familyExistenceDebounceTimer;
 
   late AnimationController _fadeController;
   late AnimationController _slideController;
@@ -74,6 +74,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void dispose() {
     _fadeController.dispose();
     _slideController.dispose();
+    _familyExistenceDebounceTimer?.cancel();
     super.dispose();
   }
 
@@ -139,16 +140,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _monitorFamilyExistence() {
-    _childService.listenToFamilyExistence(widget.familyCode).listen((exists) {
-      print('Family document exists: $exists');
-      if (!exists) {
-        print('Family document deleted, navigating to account deleted screen');
-        // Navigate to account deleted screen
+    // DISABLED: Family existence is now properly handled in main.dart authentication flow
+    // This was causing false positives when app is killed from background
+    print('🔒 Family existence monitoring disabled - handled by authentication flow');
+    
+    // Instead, only check family existence periodically when app is actively being used
+    // This prevents false account deletion during network issues or app backgrounding
+    Timer.periodic(const Duration(minutes: 5), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      print('🔍 Periodic family existence check (every 5 minutes)...');
+      final familyExists = await _childService.checkFamilyExists(widget.familyCode);
+      
+      if (familyExists == false && mounted) {
+        // Only show account deleted if we're certain the family was deleted
+        print('❌ CONFIRMED: Family was deleted during periodic check');
+        timer.cancel();
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => const AccountDeletedScreen()),
           (route) => false,
         );
+      } else if (familyExists == null) {
+        print('🌐 Network error during periodic check - will retry in 5 minutes');
+      } else {
+        print('✅ Family confirmed to exist during periodic check');
       }
     });
   }
@@ -188,7 +207,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
             const SizedBox(width: 8),
             const Text(
-              '식사 기록',
+              '식사하셨어요?',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -291,6 +310,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           ),
                         ),
 
+
                         // 위치 지도 카드
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 400),
@@ -321,8 +341,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         unselectedItemColor: AppColors.lightText,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: '홈'),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: '기록'),
-          BottomNavigationBarItem(icon: Icon(Icons.notifications), label: '알림'),
+          BottomNavigationBarItem(icon: Icon(Icons.timeline), label: '활동기록'),
           BottomNavigationBarItem(icon: Icon(Icons.settings), label: '설정'),
         ],
         onTap: (index) {
@@ -335,7 +354,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               Navigator.push(
                 context,
                 AppTheme.slideTransition(
-                  page: HistoryScreen(
+                  page: ActivityScreen(
                     familyCode: widget.familyCode,
                     familyInfo: widget.familyInfo,
                   ),
@@ -343,15 +362,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               );
               break;
             case 2:
-              Navigator.push(
-                context,
-                AppTheme.slideTransition(
-                  page: const NotificationsScreen(),
-                  rightToLeft: false, // Bottom-up transition for notifications
-                ),
-              );
-              break;
-            case 3:
               Navigator.push(
                 context,
                 AppTheme.slideTransition(

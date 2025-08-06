@@ -69,7 +69,7 @@ class FamilyInfo {
   final String familyCode;
   final String elderlyName;
   final DateTime createdAt;
-  final DateTime? lastActive;
+  final String? lastMealTime;
   final bool isActive;
   final String deviceInfo;
 
@@ -77,17 +77,46 @@ class FamilyInfo {
     required this.familyCode,
     required this.elderlyName,
     required this.createdAt,
-    this.lastActive,
+    this.lastMealTime,
     required this.isActive,
     required this.deviceInfo,
   });
 
   factory FamilyInfo.fromMap(Map<String, dynamic> map) {
+    // Handle lastMealTime which can be String, Map, or null
+    String? lastMealTimeStr;
+    final lastMealTimeRaw = map['lastMealTime'];
+    if (lastMealTimeRaw != null) {
+      if (lastMealTimeRaw is String) {
+        lastMealTimeStr = lastMealTimeRaw;
+      } else if (lastMealTimeRaw is Map) {
+        // If it's a Map (like Timestamp or complex object), extract timestamp
+        if (lastMealTimeRaw.containsKey('timestamp')) {
+          lastMealTimeStr = lastMealTimeRaw['timestamp'] as String?;
+        } else {
+          lastMealTimeStr = null; // Can't parse, set to null
+        }
+      } else if (lastMealTimeRaw is Timestamp) {
+        lastMealTimeStr = lastMealTimeRaw.toDate().toIso8601String();
+      }
+    }
+    
+    // Handle createdAt safely
+    DateTime createdAtDate;
+    final createdAtRaw = map['createdAt'];
+    if (createdAtRaw is Timestamp) {
+      createdAtDate = createdAtRaw.toDate();
+    } else if (createdAtRaw is String) {
+      createdAtDate = DateTime.parse(createdAtRaw);
+    } else {
+      createdAtDate = DateTime.now(); // Fallback
+    }
+    
     return FamilyInfo(
       familyCode: map['familyCode'] ?? '',
       elderlyName: map['elderlyName'] ?? '',
-      createdAt: (map['createdAt'] as Timestamp).toDate(),
-      lastActive: map['lastActive'] != null ? (map['lastActive'] as Timestamp).toDate() : null,
+      createdAt: createdAtDate,
+      lastMealTime: lastMealTimeStr,
       isActive: map['isActive'] ?? false,
       deviceInfo: map['deviceInfo'] ?? '',
     );

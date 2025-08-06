@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/family_record.dart';
-import '../services/firebase_service.dart';
+import '../services/auth_service.dart';
 import '../services/child_app_service.dart';
 import '../services/fcm_token_service.dart';
 import '../constants/colors.dart';
@@ -18,6 +17,7 @@ class FamilySetupScreen extends StatefulWidget {
 class _FamilySetupScreenState extends State<FamilySetupScreen> {
   final TextEditingController _codeController = TextEditingController();
   final ChildAppService _childService = ChildAppService();
+  final AuthService _authService = AuthService();
   bool _isLoading = false;
   String _errorMessage = '';
   bool _isApproving = false;
@@ -189,9 +189,8 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
                 if (success) {
                   print('✅ SUCCESS: Family code approved, saving locally and navigating');
                   
-                  // Save family code locally
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setString('family_code', code);
+                  // Save family code to user profile
+                  await _authService.addFamilyCode(code);
                   
                   // Register FCM token for this family
                   final familyId = familyData['familyId'] as String?;
@@ -284,7 +283,7 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
               const SizedBox(height: 20),
               
               Text(
-                '사랑해요',
+                '식사하셨어요?',
                 style: TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,

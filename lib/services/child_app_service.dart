@@ -1,49 +1,94 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'auth_service.dart';
 
 class ChildAppService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final AuthService _authService = AuthService();
 
-  /// Ensure authentication before any Firebase operations
-  Future<void> _ensureAuthenticated() async {
-    if (_auth.currentUser == null) {
-      print('No authenticated user, signing in anonymously...');
-      await _auth.signInAnonymously();
-      print('Anonymous authentication successful: ${_auth.currentUser?.uid}');
+  /// Ensure authentication with proper error handling and recovery
+  Future<bool> _ensureAuthenticated() async {
+    try {
+      return await _authService.isAuthenticationValid();
+    } catch (e) {
+      print('Authentication failed in ChildAppService: $e');
+      return false;
     }
+  }
+
+  /// Execute Firebase operation with timeout and retry logic
+  Future<T?> _executeWithRetry<T>(
+    Future<T> Function() operation, {
+    int maxRetries = 3,
+    Duration timeout = const Duration(seconds: 15),
+    String operationName = 'Firebase operation',
+  }) async {
+    for (int attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Ensure authentication before each attempt
+        final authSuccess = await _ensureAuthenticated();
+        if (!authSuccess) {
+          print('Authentication failed for $operationName, attempt ${attempt + 1}');
+          throw Exception('Authentication failed');
+        }
+
+        // Execute operation with timeout
+        return await operation().timeout(timeout);
+      } on SocketException catch (e) {
+        print('Network error in $operationName (attempt ${attempt + 1}): $e');
+        if (attempt == maxRetries - 1) rethrow;
+        await Future.delayed(Duration(seconds: math.pow(2, attempt).toInt()));
+      } on TimeoutException catch (e) {
+        print('Timeout in $operationName (attempt ${attempt + 1}): $e');
+        if (attempt == maxRetries - 1) rethrow;
+        await Future.delayed(Duration(seconds: math.pow(2, attempt).toInt()));
+      } on FirebaseException catch (e) {
+        print('Firebase error in $operationName (attempt ${attempt + 1}): ${e.code} - ${e.message}');
+        // Don't retry permission errors or invalid data errors
+        if (e.code == 'permission-denied' || e.code == 'invalid-argument') {
+          rethrow;
+        }
+        if (attempt == maxRetries - 1) rethrow;
+        await Future.delayed(Duration(seconds: math.pow(2, attempt).toInt()));
+      } catch (e) {
+        print('Unexpected error in $operationName (attempt ${attempt + 1}): $e');
+        if (attempt == maxRetries - 1) rethrow;
+        await Future.delayed(Duration(seconds: math.pow(2, attempt).toInt()));
+      }
+    }
+    return null;
   }
 
   /// Validate and get family information using connection code
   Future<Map<String, dynamic>?> getFamilyInfo(String connectionCode) async {
-    try {
-      await _ensureAuthenticated();
-      
-      print('Getting family info for connection code: $connectionCode');
-      
-      // Query by connectionCode instead of document ID
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
-      
-      if (query.docs.isNotEmpty) {
-        final doc = query.docs.first;
-        final data = doc.data();
-        data['familyId'] = doc.id; // Add document ID for reference
-        print('Family info found: familyId=${doc.id}, elderlyName=${data['elderlyName']}, approved=${data['approved']}');
-        return data;
-      } else {
-        print('Connection code $connectionCode does not exist');
-        return null;
-      }
-    } catch (e) {
-      print('ERROR: Failed to get family info: $e');
-      print('Error type: ${e.runtimeType}');
-      return null;
-    }
+    return await _executeWithRetry<Map<String, dynamic>>(
+      () async {
+        print('Getting family info for connection code: $connectionCode');
+        
+        // Query by connectionCode instead of document ID
+        final query = await _firestore.collection('families')
+            .where('connectionCode', isEqualTo: connectionCode)
+            .limit(1)
+            .get();
+        
+        if (query.docs.isNotEmpty) {
+          final doc = query.docs.first;
+          final data = doc.data();
+          data['familyId'] = doc.id; // Add document ID for reference
+          print('Family info found: familyId=${doc.id}, elderlyName=${data['elderlyName']}, approved=${data['approved']}');
+          return data;
+        } else {
+          print('Connection code $connectionCode does not exist');
+          return <String, dynamic>{};
+        }
+      },
+      operationName: 'getFamilyInfo',
+    );
   }
 
   /// Approve/reject family code (CRITICAL for elderly app to proceed)
@@ -52,7 +97,7 @@ class ChildAppService {
       await _ensureAuthenticated();
       
       print('🚨 CRITICAL: Attempting to approve connection code: $connectionCode with approved: $approved');
-      print('Current user: ${_auth.currentUser?.uid}');
+      print('Current user: ${_authService.currentUser?.uid}');
       
       // Find the family document by connection code
       final query = await _firestore.collection('families')
@@ -215,12 +260,12 @@ class ChildAppService {
       if (doc.exists) {
         final data = doc.data()!;
         return {
-          'lastActivity': data['lastActivity'], // Last activity timestamp
+          'lastMealTime': data['lastMealTime'], // Last meal timestamp (cleaned structure)
+          'todayMealCount': data['todayMealCount'], // Today's meal count
           'survivalAlert': data['survivalAlert'], // Active alert info
-          'foodAlert': data['foodAlert'], // Food alert info
-          'isActive': data['isActive'], // Currently active status
+          'lastPhoneActivity': data['lastPhoneActivity'], // General phone activity (any app, calls, etc.)
+          'lastActive': data['lastActive'], // Our specific app usage
           'elderlyName': data['elderlyName'],
-          'lastFoodIntake': data['lastFoodIntake'], // Last food intake data
           'location': data['location'], // Location data
         };
       }
@@ -256,13 +301,13 @@ class ChildAppService {
         if (snapshot.exists) {
           final data = snapshot.data()!;
           yield {
-            'lastActivity': data['lastActivity'], // Timestamp of last activity
+            'lastMealTime': data['lastMealTime'], // Last meal timestamp (cleaned structure)
+            'todayMealCount': data['todayMealCount'], // Today's meal count
             'survivalAlert': data['survivalAlert'], // Alert details if triggered
-            'foodAlert': data['foodAlert'], // Food alert details
-            'isActive': data['isActive'], // Is elderly person active
+            'lastPhoneActivity': data['lastPhoneActivity'], // General phone activity (any app, calls, etc.)
+            'lastActive': data['lastActive'], // Our specific app usage
             'elderlyName': data['elderlyName'],
             'settings': data['settings'], // App settings
-            'lastFoodIntake': data['lastFoodIntake'], // Last food intake data
             'location': data['location'], // Location data
           };
         } else {
@@ -304,33 +349,6 @@ class ChildAppService {
     }
   }
 
-  /// Clear food alert after family acknowledges
-  Future<bool> clearFoodAlert(String connectionCode) async {
-    try {
-      // First find the family document by connection code
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
-      
-      if (query.docs.isEmpty) {
-        print('❌ ERROR: Connection code $connectionCode does not exist');
-        return false;
-      }
-      
-      final familyId = query.docs.first.id;
-      
-      await _firestore.collection('families').doc(familyId).update({
-        'foodAlert.isActive': false,
-        'foodAlert.clearedAt': FieldValue.serverTimestamp(),
-        'foodAlert.clearedBy': 'Child App',
-      });
-      return true;
-    } catch (e) {
-      print('Failed to clear food alert: $e');
-      return false;
-    }
-  }
 
   /// Update app settings
   Future<bool> updateSettings(String connectionCode, Map<String, dynamic> settings) async {
@@ -409,20 +427,29 @@ class ChildAppService {
   }
 
   /// Check if family document still exists (for account deletion detection)
-  Future<bool> checkFamilyExists(String connectionCode) async {
-    try {
-      await _ensureAuthenticated();
-      
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
-      
-      return query.docs.isNotEmpty;
-    } catch (e) {
-      print('Error checking family exists: $e');
-      return false;
+  /// Returns null if network error, true/false if successful check
+  Future<bool?> checkFamilyExists(String connectionCode) async {
+    print('🔍 Checking if family exists for code: $connectionCode');
+    
+    final result = await _executeWithRetry<bool>(
+      () async {
+        final query = await _firestore.collection('families')
+            .where('connectionCode', isEqualTo: connectionCode)
+            .limit(1)
+            .get();
+        
+        final exists = query.docs.isNotEmpty;
+        print('📊 Family exists check result: $exists');
+        return exists;
+      },
+      operationName: 'checkFamilyExists',
+    );
+    
+    if (result == null) {
+      print('⚠️ checkFamilyExists failed due to network/connection issues');
     }
+    
+    return result; // Return null for network errors, true/false for actual results
   }
 
   /// Stream to monitor family document existence
@@ -443,18 +470,44 @@ class ChildAppService {
       final familyId = query.docs.first.id;
       print('Monitoring family document existence for ID: $familyId');
       
+      // Start with true - assume family exists until proven otherwise
+      bool lastKnownState = true;
+      yield true;
+      
       await for (final snapshot in _firestore
           .collection('families')
           .doc(familyId)
-          .snapshots()) {
-        yield snapshot.exists;
-        if (!snapshot.exists) {
-          print('Family document deleted: $familyId');
+          .snapshots(includeMetadataChanges: true)) {
+        
+        // Check if this is a metadata-only change (network status change)
+        if (snapshot.metadata.hasPendingWrites || 
+            snapshot.metadata.isFromCache) {
+          print('📡 Metadata change detected - from cache: ${snapshot.metadata.isFromCache}, pending writes: ${snapshot.metadata.hasPendingWrites}');
+          // Don't yield false for network/cache issues - keep last known state
+          continue;
+        }
+        
+        final currentExists = snapshot.exists;
+        
+        // Only yield changes if the existence state actually changed
+        if (currentExists != lastKnownState) {
+          print('📊 Family existence changed from $lastKnownState to $currentExists');
+          lastKnownState = currentExists;
+          yield currentExists;
+          
+          if (!currentExists) {
+            print('❌ Family document actually deleted: $familyId');
+          } else {
+            print('✅ Family document restored/created: $familyId');
+          }
+        } else {
+          print('📡 No change in family existence state: $currentExists');
         }
       }
     } catch (e) {
-      print('Error monitoring family existence: $e');
-      yield false;
+      print('❌ Error monitoring family existence: $e');
+      // Don't yield false on errors - this could be network issues
+      print('⚠️ Network error in family monitoring - not yielding false to prevent incorrect account deletion');
     }
   }
 

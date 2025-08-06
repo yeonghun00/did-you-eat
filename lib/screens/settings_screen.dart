@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/colors.dart';
 import '../models/family_record.dart';
+import '../services/auth_service.dart';
 import '../services/child_app_service.dart';
 import '../services/fcm_token_service.dart';
 import '../theme/app_theme.dart';
@@ -20,8 +21,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final ChildAppService _childService = ChildAppService();
+  final AuthService _authService = AuthService();
   final TextEditingController _hoursController = TextEditingController();
-  int _emergencyDays = 3;
   int _survivalAlertHours = 12;
 
   @override
@@ -34,7 +35,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
-        _emergencyDays = prefs.getInt('emergency_days') ?? 3;
         _survivalAlertHours = prefs.getInt('survival_alert_hours') ?? 12;
         _hoursController.text = _survivalAlertHours.toString();
       });
@@ -46,7 +46,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('emergency_days', _emergencyDays);
       await prefs.setInt('survival_alert_hours', _survivalAlertHours);
 
       // Also sync with Firebase
@@ -69,7 +68,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       print('Syncing settings with Firebase...');
       print('Survival alert hours: $_survivalAlertHours');
-      print('Emergency days: $_emergencyDays');
 
       // Update settings in Firebase using the new structure
       await _childService.updateSettings(widget.familyCode!, {
@@ -107,8 +105,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (result == true) {
       try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('family_code');
+        // Remove family code from user profile
+        if (widget.familyCode != null) {
+          await _authService.removeFamilyCode(widget.familyCode!);
+        }
 
         Navigator.pushAndRemoveUntil(
           context,
@@ -174,79 +174,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
 
 
-          // 비상 알림 설정
+          // 생존 신호 알림 설정
           _buildSection(
-            title: '비상 알림',
+            title: '알림 설정',
             children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.warning, color: AppColors.warningRed),
-                        const SizedBox(width: 12),
-                        const Text(
-                          '비상 알림 기준',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      '몇 일 동안 식사 기록이 없으면 비상 알림을 받으시겠습니까?',
-                      style: TextStyle(fontSize: 14, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [2, 3, 5, 7].map((days) {
-                        final isSelected = _emergencyDays == days;
-                        return Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _emergencyDays = days;
-                              });
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.only(right: 8),
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? AppColors.primaryBlue
-                                    : Colors.grey[200],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                '$days일',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: isSelected
-                                      ? Colors.white
-                                      : Colors.black,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // 생존 신호 알림 설정
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -379,76 +310,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // FCM 테스트 섹션
-          _buildSection(
-            title: 'FCM 테스트',
-            children: [
-              _buildActionItem(
-                icon: Icons.app_registration,
-                title: 'FCM 토큰 등록 테스트',
-                onTap: () async {
-                  if (widget.familyCode != null) {
-                    try {
-                      HapticFeedback.lightImpact();
-                      // Get familyId from the familyCode
-                      final familyData = await _childService.getFamilyInfo(
-                        widget.familyCode!,
-                      );
-                      final familyId = familyData?['familyId'] as String?;
-
-                      if (familyId != null) {
-                        final registered = await FCMTokenService.registerChildToken(familyId);
-                        if (registered) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('✅ FCM 토큰 등록 성공!')),
-                          );
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('❌ FCM 토큰 등록 실패')),
-                          );
-                        }
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('❌ 가족 ID를 찾을 수 없습니다')),
-                        );
-                      }
-                    } catch (e) {
-                      String errorMessage = '❌ FCM 토큰 등록 실패';
-                      if (e.toString().contains('FIS_AUTH_ERROR')) {
-                        errorMessage = '❌ Firebase 인증 오류 - 네트워크 연결을 확인하고 다시 시도해주세요';
-                      }
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(errorMessage),
-                          duration: const Duration(seconds: 4),
-                        ),
-                      );
-                    }
-                  }
-                },
-              ),
-              _buildActionItem(
-                icon: Icons.token,
-                title: 'FCM 토큰 생성 테스트',
-                onTap: () async {
-                  HapticFeedback.lightImpact();
-                  final success = await FCMTokenService.testFCMTokenGeneration();
-                  if (success) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('✅ FCM 토큰 생성 성공!')),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('❌ FCM 토큰 생성 실패')),
-                    );
-                  }
-                },
               ),
             ],
           ),
