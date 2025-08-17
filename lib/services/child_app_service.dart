@@ -10,6 +10,11 @@ class ChildAppService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final AuthService _authService = AuthService();
+  
+  // Connection tracking
+  final Map<String, StreamSubscription> _activeListeners = {};
+  bool _isConnected = false;
+  DateTime? _lastSuccessfulOperation;
 
   /// Ensure authentication with proper error handling and recovery
   Future<bool> _ensureAuthenticated() async {
@@ -510,5 +515,20 @@ class ChildAppService {
       print('⚠️ Network error in family monitoring - not yielding false to prevent incorrect account deletion');
     }
   }
+  
+  /// Clean up all active listeners
+  void dispose() {
+    for (final subscription in _activeListeners.values) {
+      subscription.cancel();
+    }
+    _activeListeners.clear();
+    print('✅ ChildAppService disposed - all listeners cancelled');
+  }
+  
+  /// Get connection status
+  bool get isConnected => _isConnected;
+  
+  /// Get last successful operation time
+  DateTime? get lastSuccessfulOperation => _lastSuccessfulOperation;
 
 }

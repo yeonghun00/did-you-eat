@@ -2,46 +2,278 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
+import 'dart:async';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
+  // Session management
+  Timer? _tokenRefreshTimer;
+  StreamSubscription<User?>? _authStateSubscription;
+  bool _isInitialized = false;
+  
+  // Persistence keys
+  static const String _lastAuthMethodKey = 'last_auth_method';
+  static const String _lastSignInTimeKey = 'last_signin_time';
+  static const String _autoSignInEnabledKey = 'auto_signin_enabled';
 
-  // Current user stream
+  // Current user stream with persistence
   Stream<User?> get authStateChanges => _auth.authStateChanges();
   User? get currentUser => _auth.currentUser;
   bool get isSignedIn => currentUser != null;
-
-  // Check if authentication is valid (NO automatic recovery)
-  Future<bool> isAuthenticationValid() async {
+  
+  // Initialize authentication service with persistence
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+    
     try {
+      // Set up Firebase Auth persistence
+      await _auth.setPersistence(Persistence.LOCAL);
+      
+      // Set up auth state listener with automatic recovery
+      _authStateSubscription = _auth.authStateChanges().listen(
+        _handleAuthStateChange,
+        onError: (error) {
+          print('Auth state error: $error');
+          _attemptTokenRefresh();
+        },
+      );
+      
+      // Set up periodic token refresh
+      _setupTokenRefresh();
+      
+      // Enable Firestore offline persistence
+      try {
+        await _firestore.enablePersistence(
+          const PersistenceSettings(synchronizeTabs: true),
+        );
+        print('✅ Firestore offline persistence enabled');
+      } catch (e) {
+        print('⚠️ Firestore persistence already enabled or failed: $e');
+      }
+      
+      _isInitialized = true;
+      print('✅ AuthService initialized with persistence');
+    } catch (e) {
+      print('❌ AuthService initialization failed: $e');
+    }
+  }
+  
+  // Handle auth state changes
+  void _handleAuthStateChange(User? user) async {
+    if (user != null) {
+      print('🔄 Auth state changed: ${user.email ?? user.uid}');
+      
+      // Refresh token if it's about to expire
+      try {
+        final tokenResult = await user.getIdTokenResult();
+        final expirationTime = tokenResult.expirationTime;
+        final now = DateTime.now();
+        
+        if (expirationTime != null) {
+          final timeUntilExpiration = expirationTime.difference(now);
+          if (timeUntilExpiration.inMinutes < 30) {
+            print('🔄 Token expires in ${timeUntilExpiration.inMinutes} minutes, refreshing...');
+            await _attemptTokenRefresh();
+          }
+        }
+      } catch (e) {
+        print('⚠️ Token check failed: $e');
+      }
+    } else {
+      print('🔄 User signed out');
+    }
+  }
+  
+  // Set up periodic token refresh
+  void _setupTokenRefresh() {
+    _tokenRefreshTimer?.cancel();
+    _tokenRefreshTimer = Timer.periodic(const Duration(minutes: 30), (timer) {
+      if (currentUser != null) {
+        _attemptTokenRefresh();
+      }
+    });
+  }
+  
+  // Attempt to refresh authentication token
+  Future<void> _attemptTokenRefresh() async {
+    try {
+      final user = currentUser;
+      if (user == null) return;
+      
+      print('🔄 Attempting token refresh for user: ${user.email ?? user.uid}');
+      
+      // Force token refresh
+      await user.getIdToken(true);
+      
+      // For Google Sign-In users, also refresh Google tokens
+      if (user.providerData.any((p) => p.providerId == 'google.com')) {
+        try {
+          final googleUser = await _googleSignIn.signInSilently();
+          if (googleUser != null) {
+            final googleAuth = await googleUser.authentication;
+            if (googleAuth.accessToken != null) {
+              final credential = GoogleAuthProvider.credential(
+                accessToken: googleAuth.accessToken,
+                idToken: googleAuth.idToken,
+              );
+              await user.reauthenticateWithCredential(credential);
+              print('✅ Google token refreshed successfully');
+            }
+          }
+        } catch (e) {
+          print('⚠️ Google token refresh failed: $e');
+        }
+      }
+      
+      print('✅ Token refresh completed');
+    } catch (e) {
+      print('❌ Token refresh failed: $e');
+    }
+  }
+  
+  // Clean up resources
+  void dispose() {
+    _tokenRefreshTimer?.cancel();
+    _authStateSubscription?.cancel();
+    _isInitialized = false;
+  }
+
+  // Check if authentication is valid with automatic recovery
+  Future<bool> isAuthenticationValid({bool autoRecover = true}) async {
+    try {
+      await initialize(); // Ensure service is initialized
+      
       final user = currentUser;
       
       if (user == null) {
         print('No user found');
+        if (autoRecover) {
+          return await _attemptAutoSignIn();
+        }
         return false;
       }
       
       // Check if user is anonymous (should not be for proper auth)
       if (user.isAnonymous) {
         print('User is anonymous - not properly authenticated');
+        if (autoRecover) {
+          return await _attemptAutoSignIn();
+        }
         return false;
       }
       
       // Validate existing token by making a test call
       try {
         await user.reload();
+        
+        // Check token expiration
+        final tokenResult = await user.getIdTokenResult();
+        final expirationTime = tokenResult.expirationTime;
+        
+        if (expirationTime != null) {
+          final now = DateTime.now();
+          if (expirationTime.isBefore(now)) {
+            print('Token has expired, attempting refresh...');
+            if (autoRecover) {
+              await _attemptTokenRefresh();
+              return await isAuthenticationValid(autoRecover: false); // Prevent infinite recursion
+            }
+            return false;
+          }
+        }
+        
         print('Auth token is valid for user: ${user.email ?? user.uid}');
         return true;
       } catch (e) {
         print('Auth token expired or invalid: $e');
+        if (autoRecover) {
+          await _attemptTokenRefresh();
+          return await isAuthenticationValid(autoRecover: false); // Prevent infinite recursion
+        }
         return false;
       }
     } catch (e) {
       print('Authentication validation failed: $e');
       return false;
+    }
+  }
+  
+  // Attempt automatic sign-in using stored credentials
+  Future<bool> _attemptAutoSignIn() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final autoSignInEnabled = prefs.getBool(_autoSignInEnabledKey) ?? false;
+      final lastAuthMethod = prefs.getString(_lastAuthMethodKey);
+      
+      if (!autoSignInEnabled || lastAuthMethod == null) {
+        print('Auto sign-in not enabled or no stored auth method');
+        return false;
+      }
+      
+      print('🔄 Attempting auto sign-in with method: $lastAuthMethod');
+      
+      switch (lastAuthMethod) {
+        case 'google':
+          return await _attemptGoogleAutoSignIn();
+        case 'apple':
+          // Apple Sign-In doesn't support silent refresh in same way
+          print('Apple Sign-In auto-refresh not supported');
+          return false;
+        default:
+          print('Unknown auth method for auto sign-in: $lastAuthMethod');
+          return false;
+      }
+    } catch (e) {
+      print('❌ Auto sign-in failed: $e');
+      return false;
+    }
+  }
+  
+  // Attempt Google auto sign-in
+  Future<bool> _attemptGoogleAutoSignIn() async {
+    try {
+      final googleUser = await _googleSignIn.signInSilently();
+      if (googleUser == null) {
+        print('Google silent sign-in returned null');
+        return false;
+      }
+      
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+      
+      final userCredential = await _auth.signInWithCredential(credential);
+      
+      if (userCredential.user != null) {
+        print('✅ Google auto sign-in successful');
+        await _saveAuthMethod('google');
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      print('❌ Google auto sign-in failed: $e');
+      return false;
+    }
+  }
+  
+  // Save authentication method for auto sign-in
+  Future<void> _saveAuthMethod(String method) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_lastAuthMethodKey, method);
+      await prefs.setInt(_lastSignInTimeKey, DateTime.now().millisecondsSinceEpoch);
+      await prefs.setBool(_autoSignInEnabledKey, true);
+      print('✅ Auth method saved: $method');
+    } catch (e) {
+      print('❌ Failed to save auth method: $e');
     }
   }
 
@@ -139,6 +371,9 @@ class AuthService {
           'signUpMethod': 'google',
           'emailVerified': userCredential.user!.emailVerified,
         });
+        
+        // Save auth method for auto sign-in
+        await _saveAuthMethod('google');
 
         return AuthResult.success(userCredential.user!);
       }
@@ -178,6 +413,9 @@ class AuthService {
           'signUpMethod': 'apple',
           'emailVerified': userCredential.user!.emailVerified,
         });
+        
+        // Save auth method for auto sign-in
+        await _saveAuthMethod('apple');
 
         return AuthResult.success(userCredential.user!);
       }
@@ -215,10 +453,26 @@ class AuthService {
 
   // Sign Out
   Future<void> signOut() async {
-    await Future.wait([
-      _auth.signOut(),
-      _googleSignIn.signOut(),
-    ]);
+    try {
+      // Clear auto sign-in settings
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_lastAuthMethodKey);
+      await prefs.remove(_lastSignInTimeKey);
+      await prefs.setBool(_autoSignInEnabledKey, false);
+      
+      // Cancel timers and subscriptions
+      dispose();
+      
+      // Sign out from all services
+      await Future.wait([
+        _auth.signOut(),
+        _googleSignIn.signOut(),
+      ]);
+      
+      print('✅ Signed out successfully');
+    } catch (e) {
+      print('❌ Sign out error: $e');
+    }
   }
 
   // Delete Account

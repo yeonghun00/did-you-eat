@@ -10,6 +10,7 @@ import 'services/child_app_service.dart';
 import 'services/fcm_message_service.dart';
 import 'services/fcm_token_service.dart';
 import 'services/auth_service.dart';
+import 'services/session_manager.dart';
 import 'models/family_record.dart';
 import 'theme/app_theme.dart';
 import 'utils/app_lifecycle_handler.dart';
@@ -100,6 +101,9 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
       // Initialize other services after Firebase is ready
       _lifecycleHandler.initialize();
       _connectivityChecker.initialize();
+      
+      // Initialize session manager
+      await SessionManager().initialize();
 
       setState(() {
         _isInitialized = true;
@@ -325,8 +329,58 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
     await Future.delayed(const Duration(seconds: 1));
 
     try {
-      // Check user profile for family codes
       final authService = AuthService();
+      final sessionManager = SessionManager();
+      
+      // Initialize services
+      await authService.initialize();
+      await sessionManager.initialize();
+      
+      // Try to restore existing session first
+      final sessionRestored = await sessionManager.restoreSession();
+      
+      if (sessionRestored && sessionManager.hasValidSession) {
+        print('✅ Session restored from storage');
+        final familyCode = sessionManager.currentFamilyCode!;
+        final cachedData = sessionManager.cachedFamilyData;
+        
+        // Validate session is still good
+        final childService = ChildAppService();
+        final familyExists = await childService.checkFamilyExists(familyCode);
+        
+        if (familyExists == true) {
+          // Create FamilyInfo from cached data
+          final familyInfo = FamilyInfo.fromMap({
+            'familyCode': familyCode,
+            'elderlyName': cachedData?['elderlyName'] ?? '',
+            'createdAt': cachedData?['createdAt'],
+            'lastMealTime': cachedData?['lastMealTime'],
+            'isActive': cachedData?['isActive'] ?? false,
+            'deviceInfo': _extractDeviceInfo(cachedData?['deviceInfo']),
+          });
+          
+          if (!mounted) return;
+          Navigator.pushReplacement(
+            context,
+            AppTheme.slideTransition(
+              page: HomeScreen(familyCode: familyCode, familyInfo: familyInfo),
+            ),
+          );
+          return;
+        } else if (familyExists == false) {
+          // Family deleted
+          await sessionManager.clearSession();
+          if (!mounted) return;
+          Navigator.pushReplacement(
+            context,
+            AppTheme.fadeTransition(page: const AccountDeletedScreen()),
+          );
+          return;
+        }
+        // If familyExists == null (network error), continue with normal flow
+      }
+      
+      // Fallback to user profile check
       final currentUser = authService.currentUser;
       print('🔍 Checking user profile for family codes...');
       print('👤 Current user: ${currentUser?.email ?? currentUser?.uid ?? 'null'}');
@@ -346,6 +400,9 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
             final familyCode = familyCodes.first;
             print('🔑 Using family code: $familyCode');
             print('💾 Family code CONFIRMED in user profile - should persist across sessions');
+            
+            // Start session with this family code
+            await sessionManager.startSession(familyCode, null);
             
             // Validate family code and check if approved
             final childService = ChildAppService();
@@ -390,6 +447,9 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
               print('🔍 Raw family data: $familyData');
               print('📊 Family data keys: ${familyData.keys.toList()}');
               print('📊 Family data types: ${familyData.map((key, value) => MapEntry(key, value.runtimeType))}');
+              
+              // Update session with family data
+              await sessionManager.startSession(familyCode, familyData);
               
               // Only pass the fields that FamilyInfo constructor expects
               final familyInfo = FamilyInfo.fromMap({
