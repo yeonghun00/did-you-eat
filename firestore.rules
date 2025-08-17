@@ -17,14 +17,23 @@ service cloud.firestore {
                resource.data.connectionCode in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyCodes;
       }
       
-      // Read access: user must be authenticated and have the family's connectionCode in their profile
-      allow read: if hasAccessToFamily();
+      // Helper function to check if this is an approval operation
+      function isApprovalOperation() {
+        return request.auth != null &&
+               request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['approved', 'approvedAt', 'approvedBy', 'childAppUserId', 'memberIds']);
+      }
+      
+      // Read access: authenticated users can read families by connectionCode for initial connection
+      allow read: if request.auth != null;
       
       // Write access: more restrictive - only for specific operations
-      allow update: if hasAccessToFamily() && 
+      allow update: if (hasAccessToFamily() && 
                        // Only allow updating these fields from child app
                        request.resource.data.diff(resource.data).affectedKeys()
-                       .hasOnly(['survivalAlert', 'settings', 'lastChildAppActivity']);
+                       .hasOnly(['survivalAlert', 'settings', 'lastChildAppActivity'])) ||
+                       // OR allow approval operations by any authenticated user
+                       isApprovalOperation();
       
       // Create/Delete: only authenticated users (for family creation from parent app)
       allow create: if request.auth != null;

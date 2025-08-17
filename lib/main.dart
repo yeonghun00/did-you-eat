@@ -96,7 +96,15 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
       }
 
       // FCM and Firebase are now initialized
-      // Authentication will be handled by AuthWrapper
+      // Ensure basic Firebase Auth is ready
+      try {
+        // Initialize AuthService to set up proper authentication state
+        final authService = AuthService();
+        await authService.initialize();
+        print('✅ AuthService initialized successfully');
+      } catch (e) {
+        print('⚠️ AuthService initialization failed, but continuing: $e');
+      }
 
       // Initialize other services after Firebase is ready
       _lifecycleHandler.initialize();

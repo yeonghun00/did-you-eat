@@ -19,9 +19,30 @@ class ChildAppService {
   /// Ensure authentication with proper error handling and recovery
   Future<bool> _ensureAuthenticated() async {
     try {
+      // First check if there's a current user
+      final currentUser = FirebaseAuth.instance.currentUser;
+      
+      if (currentUser != null) {
+        print('✅ User already authenticated: ${currentUser.uid} (anonymous: ${currentUser.isAnonymous})');
+        return true;
+      }
+      
+      // If no user, try to authenticate anonymously for Firebase access
+      print('🔄 No current user, attempting anonymous authentication...');
+      try {
+        final userCredential = await FirebaseAuth.instance.signInAnonymously();
+        if (userCredential.user != null) {
+          print('✅ Anonymous authentication successful: ${userCredential.user!.uid}');
+          return true;
+        }
+      } catch (e) {
+        print('❌ Anonymous authentication failed: $e');
+      }
+      
+      // Fallback to AuthService validation
       return await _authService.isAuthenticationValid();
     } catch (e) {
-      print('Authentication failed in ChildAppService: $e');
+      print('❌ Authentication failed in ChildAppService: $e');
       return false;
     }
   }
@@ -54,7 +75,24 @@ class ChildAppService {
         await Future.delayed(Duration(seconds: math.pow(2, attempt).toInt()));
       } on FirebaseException catch (e) {
         print('Firebase error in $operationName (attempt ${attempt + 1}): ${e.code} - ${e.message}');
-        // Don't retry permission errors or invalid data errors
+        
+        // For approval operations specifically, provide detailed error context
+        if (operationName == 'approveFamilyCode' && e.code == 'permission-denied') {
+          print('❌ PERMISSION DENIED during approval operation:');
+          print('   - User ID: ${FirebaseAuth.instance.currentUser?.uid}');
+          print('   - Is Anonymous: ${FirebaseAuth.instance.currentUser?.isAnonymous}');
+          print('   - Error Details: ${e.message}');
+          print('   - This suggests the user is not in the family memberIds yet');
+          
+          // For permission errors during approval, retry once in case of race conditions
+          if (attempt < 1) {
+            print('🔄 Retrying approval operation in case of race condition...');
+            await Future.delayed(Duration(seconds: 2));
+            continue;
+          }
+        }
+        
+        // Don't retry permission errors (except approval operations) or invalid data errors
         if (e.code == 'permission-denied' || e.code == 'invalid-argument') {
           rethrow;
         }
@@ -71,25 +109,53 @@ class ChildAppService {
 
   /// Validate and get family information using connection code
   Future<Map<String, dynamic>?> getFamilyInfo(String connectionCode) async {
-    return await _executeWithRetry<Map<String, dynamic>>(
+    return await _executeWithRetry<Map<String, dynamic>?>(
       () async {
-        print('Getting family info for connection code: $connectionCode');
+        print('🔍 Getting family info for connection code: $connectionCode');
+        
+        // Ensure we have proper authentication
+        final currentUser = FirebaseAuth.instance.currentUser;
+        print('🔑 Current user: ${currentUser?.uid ?? 'null'} (anonymous: ${currentUser?.isAnonymous ?? 'unknown'})');
         
         // Query by connectionCode instead of document ID
+        print('📡 Querying families collection...');
         final query = await _firestore.collection('families')
             .where('connectionCode', isEqualTo: connectionCode)
             .limit(1)
             .get();
         
+        print('📊 Query completed. Found ${query.docs.length} documents');
+        
         if (query.docs.isNotEmpty) {
           final doc = query.docs.first;
           final data = doc.data();
           data['familyId'] = doc.id; // Add document ID for reference
-          print('Family info found: familyId=${doc.id}, elderlyName=${data['elderlyName']}, approved=${data['approved']}');
+          
+          print('✅ Family info found:');
+          print('   - Family ID: ${doc.id}');
+          print('   - Elderly Name: ${data['elderlyName']}');
+          print('   - Approved: ${data['approved']}');
+          print('   - Connection Code: ${data['connectionCode']}');
+          print('   - Is Active: ${data['isActive']}');
+          print('   - Created At: ${data['createdAt']}');
+          
           return data;
         } else {
-          print('Connection code $connectionCode does not exist');
-          return <String, dynamic>{};
+          print('❌ Connection code $connectionCode does not exist in families collection');
+          
+          // Debug: Let's check if there are any families at all
+          try {
+            final allFamilies = await _firestore.collection('families').limit(5).get();
+            print('🔍 Debug: Found ${allFamilies.docs.length} families in collection');
+            for (final family in allFamilies.docs) {
+              final familyData = family.data();
+              print('   - Family ${family.id}: connectionCode=${familyData['connectionCode']}, elderlyName=${familyData['elderlyName']}');
+            }
+          } catch (e) {
+            print('❌ Debug query failed: $e');
+          }
+          
+          return null; // Return null instead of empty map for clarity
         }
       },
       operationName: 'getFamilyInfo',
@@ -98,51 +164,118 @@ class ChildAppService {
 
   /// Approve/reject family code (CRITICAL for elderly app to proceed)
   Future<bool> approveFamilyCode(String connectionCode, bool approved) async {
-    try {
-      await _ensureAuthenticated();
-      
-      print('🚨 CRITICAL: Attempting to approve connection code: $connectionCode with approved: $approved');
-      print('Current user: ${_authService.currentUser?.uid}');
-      
-      // Find the family document by connection code
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
-      
-      if (query.docs.isEmpty) {
-        print('❌ ERROR: Connection code $connectionCode does not exist');
-        return false;
-      }
-      
-      final doc = query.docs.first;
-      final familyId = doc.id;
-      final currentData = doc.data();
-      
-      print('Found family ID: $familyId for connection code: $connectionCode');
-      print('Current approval status: ${currentData['approved']}');
-      
-      // Update the approval status using the correct family ID
-      await _firestore.collection('families').doc(familyId).update({
-        'approved': approved,
-        'approvedAt': FieldValue.serverTimestamp(),
-        'approvedBy': 'Child App',
-      });
-      
-      print('✅ SUCCESS: Family ID $familyId (connection code $connectionCode) updated with approved: $approved');
-      
-      // Verify the update worked
-      final updatedDoc = await _firestore.collection('families').doc(familyId).get();
-      final updatedData = updatedDoc.data()!;
-      print('✅ VERIFICATION: approved field is now: ${updatedData['approved']}');
-      
-      return true;
-    } catch (e) {
-      print('❌ ERROR: Failed to approve family code: $e');
-      print('Error type: ${e.runtimeType}');
-      print('Error details: ${e.toString()}');
-      return false;
-    }
+    return await _executeWithRetry<bool>(
+      () async {
+        print('🚨 CRITICAL: Attempting to approve connection code: $connectionCode with approved: $approved');
+        
+        // Ensure we have authentication
+        final currentUser = FirebaseAuth.instance.currentUser;
+        print('🔑 Current user: ${currentUser?.uid} (anonymous: ${currentUser?.isAnonymous})');
+        
+        if (currentUser == null) {
+          throw Exception('No authenticated user for approval operation');
+        }
+        
+        // Find the family document by connection code
+        print('📡 Querying for family with connection code: $connectionCode');
+        final query = await _firestore.collection('families')
+            .where('connectionCode', isEqualTo: connectionCode)
+            .limit(1)
+            .get();
+        
+        if (query.docs.isEmpty) {
+          print('❌ ERROR: Connection code $connectionCode does not exist');
+          throw Exception('Family document not found for connection code: $connectionCode');
+        }
+        
+        final doc = query.docs.first;
+        final familyId = doc.id;
+        final currentData = doc.data();
+        
+        print('✅ Found family document:');
+        print('   - Family ID: $familyId');
+        print('   - Connection Code: ${currentData['connectionCode']}');
+        print('   - Current approval status: ${currentData['approved']}');
+        print('   - Elderly Name: ${currentData['elderlyName']}');
+        print('   - Current memberIds: ${currentData['memberIds']}');
+        
+        // Verify this is the right document
+        if (currentData['connectionCode'] != connectionCode) {
+          throw Exception('Connection code mismatch: expected $connectionCode, got ${currentData['connectionCode']}');
+        }
+        
+        // Use a transaction to atomically add user to memberIds and update approval status
+        print('🔄 Starting transaction to update approval status and membership');
+        
+        final result = await _firestore.runTransaction<bool>((transaction) async {
+          // Re-read the document inside the transaction
+          final familyDocRef = _firestore.collection('families').doc(familyId);
+          final snapshot = await transaction.get(familyDocRef);
+          
+          if (!snapshot.exists) {
+            throw Exception('Family document no longer exists during transaction');
+          }
+          
+          final familyData = snapshot.data()!;
+          final currentMemberIds = List<String>.from(familyData['memberIds'] ?? []);
+          
+          // Prepare update data
+          Map<String, dynamic> updateData = {
+            'approved': approved,
+            'approvedAt': FieldValue.serverTimestamp(),
+            'approvedBy': 'Child App',
+            'childAppUserId': currentUser.uid,
+          };
+          
+          // If approving, add the current user to memberIds if not already present
+          if (approved && !currentMemberIds.contains(currentUser.uid)) {
+            currentMemberIds.add(currentUser.uid);
+            updateData['memberIds'] = currentMemberIds;
+            print('🔄 Adding user ${currentUser.uid} to family memberIds');
+          }
+          
+          // Perform the atomic update
+          transaction.update(familyDocRef, updateData);
+          
+          print('✅ Transaction prepared with updates: ${updateData.keys.join(', ')}');
+          return true;
+        });
+        
+        if (result) {
+          print('✅ SUCCESS: Family ID $familyId updated with approved: $approved');
+          
+          // Verify the update worked by re-reading the document
+          final updatedDoc = await _firestore.collection('families').doc(familyId).get();
+          if (updatedDoc.exists) {
+            final updatedData = updatedDoc.data()!;
+            final newApprovalStatus = updatedData['approved'];
+            final newMemberIds = List<String>.from(updatedData['memberIds'] ?? []);
+            
+            print('✅ VERIFICATION: approved field is now: $newApprovalStatus');
+            print('✅ VERIFICATION: memberIds is now: $newMemberIds');
+            
+            if (newApprovalStatus == approved) {
+              if (approved && !newMemberIds.contains(currentUser.uid)) {
+                print('⚠️ WARNING: User was not added to memberIds as expected');
+              } else {
+                print('🎉 CONFIRMATION: Approval update was successful!');
+              }
+              return true;
+            } else {
+              print('❌ VERIFICATION FAILED: Expected $approved, got $newApprovalStatus');
+              throw Exception('Approval update verification failed');
+            }
+          } else {
+            print('❌ VERIFICATION FAILED: Document no longer exists');
+            throw Exception('Document disappeared after update');
+          }
+        } else {
+          throw Exception('Transaction failed to complete');
+        }
+      },
+      operationName: 'approveFamilyCode',
+      maxRetries: 2, // Fewer retries for approval to avoid double-processing
+    ) ?? false;
   }
 
   /// Get all recordings with audio/photo URLs

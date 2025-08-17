@@ -14,34 +14,59 @@ class FirebaseService {
   /// Resolve familyId from connectionCode (CRITICAL for child app)
   static Future<String?> getFamilyIdFromConnectionCode(String connectionCode) async {
     try {
+      print('🔍 Resolving familyId for connectionCode: $connectionCode');
+      
       // Check cache first
       if (_familyIdCache.containsKey(connectionCode)) {
+        print('✅ Found cached familyId: ${_familyIdCache[connectionCode]}');
         return _familyIdCache[connectionCode];
       }
 
       // Query families collection to find matching connectionCode
+      print('📡 Querying families collection...');
       final querySnapshot = await _firestore
           .collection('families')
           .where('connectionCode', isEqualTo: connectionCode)
-          .where('isActive', isEqualTo: true)
-          .limit(1)
+          .limit(1) // Remove isActive filter - let child app see all families
           .get();
+
+      print('📊 Query result: ${querySnapshot.docs.length} documents found');
 
       if (querySnapshot.docs.isNotEmpty) {
         final doc = querySnapshot.docs.first;
         final familyId = doc.id;
+        final data = doc.data();
+        
+        print('✅ Family document found:');
+        print('   - Family ID: $familyId');
+        print('   - Connection Code: ${data['connectionCode']}');
+        print('   - Is Active: ${data['isActive']}');
+        print('   - Approved: ${data['approved']}');
         
         // Cache the result
         _familyIdCache[connectionCode] = familyId;
         
-        print('Resolved connectionCode $connectionCode to familyId $familyId');
+        print('✅ Cached familyId $familyId for connectionCode $connectionCode');
         return familyId;
       }
       
-      print('No active family found for connectionCode: $connectionCode');
+      print('❌ No family found for connectionCode: $connectionCode');
+      
+      // Debug: Check what families exist
+      try {
+        final allFamilies = await _firestore.collection('families').limit(3).get();
+        print('🔍 Debug: Total families in collection: ${allFamilies.docs.length}');
+        for (final family in allFamilies.docs) {
+          final familyData = family.data();
+          print('   - Family ${family.id}: code=${familyData['connectionCode']}, active=${familyData['isActive']}');
+        }
+      } catch (e) {
+        print('❌ Debug query failed: $e');
+      }
+      
       return null;
     } catch (e) {
-      print('Error resolving family ID: $e');
+      print('❌ Error resolving family ID: $e');
       return null;
     }
   }
@@ -69,38 +94,53 @@ class FirebaseService {
   // 가족 코드 검증 및 정보 가져오기 (UPDATED for new structure)
   static Future<FamilyInfo?> validateFamilyCode(String connectionCode) async {
     try {
-      print('Attempting to validate connection code: $connectionCode');
+      print('🔍 Attempting to validate connection code: $connectionCode');
       
-      // Ensure anonymous authentication
-      if (FirebaseAuth.instance.currentUser == null) {
-        await FirebaseAuth.instance.signInAnonymously();
+      // Ensure authentication (anonymous is fine for reading)
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('🔄 No current user, signing in anonymously...');
+        try {
+          final userCredential = await FirebaseAuth.instance.signInAnonymously();
+          print('✅ Anonymous auth successful: ${userCredential.user?.uid}');
+        } catch (e) {
+          print('❌ Anonymous auth failed: $e');
+          return null;
+        }
+      } else {
+        print('✅ User already authenticated: ${currentUser.uid} (anonymous: ${currentUser.isAnonymous})');
       }
       
       // Use new family data resolution
       final familyData = await getFamilyDataForChild(connectionCode);
       if (familyData == null) {
-        print('No family found for connection code: $connectionCode');
+        print('❌ No family found for connection code: $connectionCode');
         return null;
       }
       
-      print('Family data loaded: $familyData');
+      print('✅ Family data loaded successfully');
+      print('📊 Family data keys: ${familyData.keys.toList()}');
       
       // Check if approved (if null, it's still pending)
       final approved = familyData['approved'] as bool?;
-      print('Approval status: $approved');
+      print('📋 Approval status: $approved');
       
       // Only return family info if approved or still pending
       if (approved != false) {
-        return FamilyInfo.fromMap({
+        final familyInfo = FamilyInfo.fromMap({
           'familyCode': connectionCode,
           ...familyData,
         });
+        print('✅ Family info created successfully');
+        return familyInfo;
       } else {
-        print('Family connection was rejected');
+        print('❌ Family connection was rejected');
         return null;
       }
     } catch (e) {
-      print('Error validating family code: $e');
+      print('❌ Error validating family code: $e');
+      print('❌ Error type: ${e.runtimeType}');
+      print('❌ Stack trace: ${StackTrace.current}');
       return null;
     }
   }

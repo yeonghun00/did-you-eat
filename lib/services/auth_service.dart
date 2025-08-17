@@ -3,6 +3,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'dart:async';
 
@@ -31,8 +32,17 @@ class AuthService {
     if (_isInitialized) return;
     
     try {
-      // Set up Firebase Auth persistence
-      await _auth.setPersistence(Persistence.LOCAL);
+      // Set up Firebase Auth persistence (only on web)
+      if (kIsWeb) {
+        try {
+          await _auth.setPersistence(Persistence.LOCAL);
+          print('✅ Firebase Auth web persistence set');
+        } catch (e) {
+          print('⚠️ Firebase Auth web persistence failed: $e');
+        }
+      } else {
+        print('✅ Mobile platform - Firebase Auth persistence is automatic');
+      }
       
       // Set up auth state listener with automatic recovery
       _authStateSubscription = _auth.authStateChanges().listen(
@@ -46,20 +56,31 @@ class AuthService {
       // Set up periodic token refresh
       _setupTokenRefresh();
       
-      // Enable Firestore offline persistence
-      try {
-        await _firestore.enablePersistence(
-          const PersistenceSettings(synchronizeTabs: true),
-        );
-        print('✅ Firestore offline persistence enabled');
-      } catch (e) {
-        print('⚠️ Firestore persistence already enabled or failed: $e');
+      // Enable Firestore offline persistence (only on mobile)
+      if (!kIsWeb) {
+        try {
+          await _firestore.enablePersistence();
+          print('✅ Firestore offline persistence enabled');
+        } catch (e) {
+          print('⚠️ Firestore persistence already enabled or failed: $e');
+        }
+      } else {
+        try {
+          await _firestore.enablePersistence(
+            const PersistenceSettings(synchronizeTabs: true),
+          );
+          print('✅ Firestore web persistence enabled');
+        } catch (e) {
+          print('⚠️ Firestore web persistence already enabled or failed: $e');
+        }
       }
       
       _isInitialized = true;
-      print('✅ AuthService initialized with persistence');
+      print('✅ AuthService initialized with platform-appropriate persistence');
     } catch (e) {
       print('❌ AuthService initialization failed: $e');
+      // Don't let persistence failures block initialization
+      _isInitialized = true;
     }
   }
   

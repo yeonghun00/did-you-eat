@@ -25,6 +25,30 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
   @override
   void initState() {
     super.initState();
+    _initializeAuth();
+  }
+  
+  Future<void> _initializeAuth() async {
+    // Ensure authentication is properly set up
+    try {
+      await _authService.initialize();
+      
+      // Ensure we have some form of authentication for Firebase access
+      final currentUser = _authService.currentUser;
+      if (currentUser == null) {
+        print('🔄 No current user, attempting anonymous authentication...');
+        final result = await _authService.signInAnonymously();
+        if (result.isSuccess) {
+          print('✅ Anonymous authentication successful');
+        } else {
+          print('❌ Anonymous authentication failed: ${result.errorMessage}');
+        }
+      } else {
+        print('✅ User already authenticated: ${currentUser.uid}');
+      }
+    } catch (e) {
+      print('❌ Authentication initialization failed: $e');
+    }
   }
 
   Future<void> _validateCode() async {
@@ -56,7 +80,7 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
       print('🔍 Validating family code: $code');
       final familyData = await _childService.getFamilyInfo(code);
       
-      if (familyData != null) {
+      if (familyData != null && familyData.isNotEmpty) {
         // Check if already processed
         final approved = familyData['approved'];
         print('Family code $code approval status: $approved');
@@ -71,8 +95,9 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
         // Show approval dialog with elderly person's name
         _showApprovalDialog(code, familyData);
       } else {
+        print('❌ Family data is null or empty for code: $code');
         setState(() {
-          _errorMessage = '유효하지 않은 가족 코드입니다';
+          _errorMessage = '가족 코드 $code를 찾을 수 없습니다.\n부모님이 앱에서 가족 코드를 생성했는지 확인해주세요.';
         });
       }
     } catch (e) {
