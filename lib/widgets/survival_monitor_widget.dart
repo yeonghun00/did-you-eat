@@ -48,6 +48,8 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
         }
 
         final data = snapshot.data!;
+        
+        
         final todayMealCount = data['todayMealCount'] as int? ?? 0;
         final survivalAlert = data['survivalAlert'] as Map<String, dynamic>?;
         final elderlyName = data['elderlyName'] as String? ?? '';

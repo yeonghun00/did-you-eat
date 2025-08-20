@@ -1,0 +1,33 @@
+// Firebase Security Rules for FCM Token Registration
+// Copy these rules to your Firebase Console -> Firestore Database -> Rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Families collection - allow authenticated users
+    match /families/{familyId} {
+      allow read, write: if request.auth != null;
+      
+      // CRITICAL: Child devices subcollection for FCM tokens
+      match /child_devices/{deviceId} {
+        allow read, write: if request.auth != null;
+      }
+      
+      // Other subcollections (meals, etc.)
+      match /{subcollection=**} {
+        allow read, write: if request.auth != null;
+      }
+    }
+  }
+}
+
+// DEPLOYMENT INSTRUCTIONS:
+// 1. Go to Firebase Console: https://console.firebase.google.com/
+// 2. Select your project: thanks-everyday
+// 3. Go to Firestore Database -> Rules
+// 4. Replace the existing rules with the above rules
+// 5. Click "Publish" to deploy
+
+// VERIFICATION:
+// After deploying, test FCM registration in child app
+// Should see: "🔥 FIREBASE: Successfully wrote FCM token to Firestore"

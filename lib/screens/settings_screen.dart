@@ -85,40 +85,347 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _changeFamilyCode() async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('가족 코드 변경'),
-        content: const Text(
-          '가족 코드를 변경하시겠습니까?\n현재 연결이 해제되고 새로운 가족 코드를 입력해야 합니다.',
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                spreadRadius: 2,
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Warning icon and title
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: AppColors.warningRed.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.warning_rounded,
+                  color: AppColors.warningRed,
+                  size: 30,
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              const Text(
+                '가족 코드 변경',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.darkText,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              
+              Text(
+                '이 작업은 되돌릴 수 없습니다',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppColors.warningRed,
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              
+              // Data deletion warning
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.warningRed.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppColors.warningRed.withOpacity(0.2),
+                    width: 1,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '다음 데이터가 모두 삭제됩니다:',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.darkText,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildDeletedDataItem(Icons.family_restroom, '부모님 연결 정보'),
+                    _buildDeletedDataItem(Icons.restaurant, '모든 식사 기록 히스토리'),
+                    _buildDeletedDataItem(Icons.health_and_safety, '생존 신호 설정'),
+                    _buildDeletedDataItem(Icons.history, '앱 사용 기록'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Action buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      height: 48,
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        style: TextButton.styleFrom(
+                          backgroundColor: AppColors.softGray,
+                          foregroundColor: AppColors.darkText,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          '취소',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Container(
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.warningRed,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          '삭제하고 변경',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('변경'),
-          ),
-        ],
       ),
     );
 
     if (result == true) {
-      try {
-        // Remove family code from user profile
-        if (widget.familyCode != null) {
-          await _authService.removeFamilyCode(widget.familyCode!);
-        }
+      // Double confirmation for destructive action
+      final finalConfirmation = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: AppColors.warningRed.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.delete_forever_rounded,
+                    color: AppColors.warningRed,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                const Text(
+                  '최종 확인',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.darkText,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                
+                const Text(
+                  '정말로 모든 데이터를 삭제하고\n가족 코드를 변경하시겠습니까?',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: AppColors.darkText,
+                    height: 1.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                
+                Text(
+                  '이 작업은 되돌릴 수 없습니다.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: AppColors.warningRed,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 44,
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          style: TextButton.styleFrom(
+                            backgroundColor: AppColors.softGray,
+                            foregroundColor: AppColors.darkText,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Text(
+                            '취소',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Container(
+                        height: 44,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.warningRed,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Text(
+                            '네, 삭제합니다',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 
-        Navigator.pushAndRemoveUntil(
-          context,
-          AppTheme.slideTransition(page: const FamilySetupScreen()),
-          (route) => false,
+      if (finalConfirmation == true) {
+        // Show loading dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 20),
+                Text('데이터를 삭제하고 있습니다...'),
+              ],
+            ),
+          ),
         );
-      } catch (e) {
-        print('Error changing family code: $e');
+
+        try {
+          // Remove family code from user profile
+          if (widget.familyCode != null) {
+            await _authService.removeFamilyCode(widget.familyCode!);
+          }
+
+          // Close loading dialog
+          if (mounted) Navigator.of(context).pop();
+
+          Navigator.pushAndRemoveUntil(
+            context,
+            AppTheme.slideTransition(page: const FamilySetupScreen()),
+            (route) => false,
+          );
+        } catch (e) {
+          print('Error changing family code: $e');
+          // Close loading dialog
+          if (mounted) Navigator.of(context).pop();
+          
+          // Show error message to user
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('가족 코드 변경 중 오류가 발생했습니다.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
       }
     }
+  }
+
+
+  Widget _buildDeletedDataItem(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 18,
+            color: AppColors.warningRed,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 14,
+                color: AppColors.darkText,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -156,7 +463,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildInfoItem(
                 icon: Icons.family_restroom,
                 title: '부모님 이름',
-                value: widget.familyInfo?.elderlyName ?? '정보 없음',
+                value: widget.familyInfo?.elderlyName ?? '연결 정보 없음',
               ),
               _buildInfoItem(
                 icon: Icons.code,
@@ -192,7 +499,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Icon(Icons.heart_broken, color: AppColors.warningRed),
                         const SizedBox(width: 12),
                         const Text(
-                          '생존 신호 알림',
+                          '부모님 안전 안심 알림',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
@@ -202,7 +509,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      '몇 시간 동안 활동이 없으면 생존 신호 알림을 받으시겠습니까?',
+                      '몇 시간 동안 활동이 없으면 부모님 안전 안심 알림을 받으시겠습니까?',
                       style: TextStyle(fontSize: 14, color: Colors.grey),
                     ),
                     const SizedBox(height: 16),

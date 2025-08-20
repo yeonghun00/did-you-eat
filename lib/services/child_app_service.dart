@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'auth_service.dart';
+import '../utils/secure_logger.dart';
 
 class ChildAppService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -23,26 +24,26 @@ class ChildAppService {
       final currentUser = FirebaseAuth.instance.currentUser;
       
       if (currentUser != null) {
-        print('✅ User already authenticated: ${currentUser.uid} (anonymous: ${currentUser.isAnonymous})');
+        secureLog.security('User already authenticated (anonymous: ${currentUser.isAnonymous})');
         return true;
       }
       
       // If no user, try to authenticate anonymously for Firebase access
-      print('🔄 No current user, attempting anonymous authentication...');
+      secureLog.security('No current user, attempting anonymous authentication');
       try {
         final userCredential = await FirebaseAuth.instance.signInAnonymously();
         if (userCredential.user != null) {
-          print('✅ Anonymous authentication successful: ${userCredential.user!.uid}');
+          secureLog.security('Anonymous authentication successful');
           return true;
         }
       } catch (e) {
-        print('❌ Anonymous authentication failed: $e');
+        secureLog.error('Anonymous authentication failed', e);
       }
       
       // Fallback to AuthService validation
       return await _authService.isAuthenticationValid();
     } catch (e) {
-      print('❌ Authentication failed in ChildAppService: $e');
+      secureLog.error('Authentication failed in ChildAppService', e);
       return false;
     }
   }
@@ -59,34 +60,30 @@ class ChildAppService {
         // Ensure authentication before each attempt
         final authSuccess = await _ensureAuthenticated();
         if (!authSuccess) {
-          print('Authentication failed for $operationName, attempt ${attempt + 1}');
+          secureLog.warning('Authentication failed for $operationName, attempt ${attempt + 1}');
           throw Exception('Authentication failed');
         }
 
         // Execute operation with timeout
         return await operation().timeout(timeout);
       } on SocketException catch (e) {
-        print('Network error in $operationName (attempt ${attempt + 1}): $e');
+        secureLog.warning('Network error in $operationName (attempt ${attempt + 1})', e);
         if (attempt == maxRetries - 1) rethrow;
         await Future.delayed(Duration(seconds: math.pow(2, attempt).toInt()));
       } on TimeoutException catch (e) {
-        print('Timeout in $operationName (attempt ${attempt + 1}): $e');
+        secureLog.warning('Timeout in $operationName (attempt ${attempt + 1})', e);
         if (attempt == maxRetries - 1) rethrow;
         await Future.delayed(Duration(seconds: math.pow(2, attempt).toInt()));
       } on FirebaseException catch (e) {
-        print('Firebase error in $operationName (attempt ${attempt + 1}): ${e.code} - ${e.message}');
+        secureLog.error('Firebase error in $operationName (attempt ${attempt + 1}): ${e.code}', e);
         
         // For approval operations specifically, provide detailed error context
         if (operationName == 'approveFamilyCode' && e.code == 'permission-denied') {
-          print('❌ PERMISSION DENIED during approval operation:');
-          print('   - User ID: ${FirebaseAuth.instance.currentUser?.uid}');
-          print('   - Is Anonymous: ${FirebaseAuth.instance.currentUser?.isAnonymous}');
-          print('   - Error Details: ${e.message}');
-          print('   - This suggests the user is not in the family memberIds yet');
+          secureLog.error('PERMISSION DENIED during approval operation - user may not be in family memberIds yet', e);
           
           // For permission errors during approval, retry once in case of race conditions
           if (attempt < 1) {
-            print('🔄 Retrying approval operation in case of race condition...');
+            secureLog.warning('Retrying approval operation in case of race condition');
             await Future.delayed(Duration(seconds: 2));
             continue;
           }
@@ -99,7 +96,7 @@ class ChildAppService {
         if (attempt == maxRetries - 1) rethrow;
         await Future.delayed(Duration(seconds: math.pow(2, attempt).toInt()));
       } catch (e) {
-        print('Unexpected error in $operationName (attempt ${attempt + 1}): $e');
+        secureLog.error('Unexpected error in $operationName (attempt ${attempt + 1})', e);
         if (attempt == maxRetries - 1) rethrow;
         await Future.delayed(Duration(seconds: math.pow(2, attempt).toInt()));
       }
@@ -111,48 +108,42 @@ class ChildAppService {
   Future<Map<String, dynamic>?> getFamilyInfo(String connectionCode) async {
     return await _executeWithRetry<Map<String, dynamic>?>(
       () async {
-        print('🔍 Getting family info for connection code: $connectionCode');
+        secureLog.operationStart('Getting family info for connection code');
         
         // Ensure we have proper authentication
         final currentUser = FirebaseAuth.instance.currentUser;
-        print('🔑 Current user: ${currentUser?.uid ?? 'null'} (anonymous: ${currentUser?.isAnonymous ?? 'unknown'})');
+        secureLog.debug('Current user authenticated (anonymous: ${currentUser?.isAnonymous ?? 'unknown'})');
         
         // Query by connectionCode instead of document ID
-        print('📡 Querying families collection...');
+        secureLog.debug('Querying families collection');
         final query = await _firestore.collection('families')
             .where('connectionCode', isEqualTo: connectionCode)
             .limit(1)
             .get();
         
-        print('📊 Query completed. Found ${query.docs.length} documents');
+        secureLog.debug('Query completed. Found ${query.docs.length} documents');
         
         if (query.docs.isNotEmpty) {
           final doc = query.docs.first;
           final data = doc.data();
           data['familyId'] = doc.id; // Add document ID for reference
           
-          print('✅ Family info found:');
-          print('   - Family ID: ${doc.id}');
-          print('   - Elderly Name: ${data['elderlyName']}');
-          print('   - Approved: ${data['approved']}');
-          print('   - Connection Code: ${data['connectionCode']}');
-          print('   - Is Active: ${data['isActive']}');
-          print('   - Created At: ${data['createdAt']}');
+          secureLog.operationSuccess('Family info found with elderly name: ${data['elderlyName']}, approved: ${data['approved']}, active: ${data['isActive']}');
           
           return data;
         } else {
-          print('❌ Connection code $connectionCode does not exist in families collection');
+          secureLog.warning('Connection code does not exist in families collection');
           
           // Debug: Let's check if there are any families at all
           try {
             final allFamilies = await _firestore.collection('families').limit(5).get();
-            print('🔍 Debug: Found ${allFamilies.docs.length} families in collection');
+            secureLog.debug('Debug: Found ${allFamilies.docs.length} families in collection');
             for (final family in allFamilies.docs) {
               final familyData = family.data();
-              print('   - Family ${family.id}: connectionCode=${familyData['connectionCode']}, elderlyName=${familyData['elderlyName']}');
+              secureLog.debug('Family found with elderlyName: ${familyData['elderlyName']}');
             }
           } catch (e) {
-            print('❌ Debug query failed: $e');
+            secureLog.error('Debug query failed', e);
           }
           
           return null; // Return null instead of empty map for clarity
@@ -166,25 +157,25 @@ class ChildAppService {
   Future<bool> approveFamilyCode(String connectionCode, bool approved) async {
     return await _executeWithRetry<bool>(
       () async {
-        print('🚨 CRITICAL: Attempting to approve connection code: $connectionCode with approved: $approved');
+        secureLog.security('CRITICAL: Attempting to approve family connection');
         
         // Ensure we have authentication
         final currentUser = FirebaseAuth.instance.currentUser;
-        print('🔑 Current user: ${currentUser?.uid} (anonymous: ${currentUser?.isAnonymous})');
+        secureLog.security('Current user authenticated for approval (anonymous: ${currentUser?.isAnonymous})');
         
         if (currentUser == null) {
           throw Exception('No authenticated user for approval operation');
         }
         
         // Find the family document by connection code
-        print('📡 Querying for family with connection code: $connectionCode');
+        secureLog.debug('Querying for family with connection code');
         final query = await _firestore.collection('families')
             .where('connectionCode', isEqualTo: connectionCode)
             .limit(1)
             .get();
         
         if (query.docs.isEmpty) {
-          print('❌ ERROR: Connection code $connectionCode does not exist');
+          secureLog.error('ERROR: Connection code does not exist');
           throw Exception('Family document not found for connection code: $connectionCode');
         }
         
@@ -192,12 +183,7 @@ class ChildAppService {
         final familyId = doc.id;
         final currentData = doc.data();
         
-        print('✅ Found family document:');
-        print('   - Family ID: $familyId');
-        print('   - Connection Code: ${currentData['connectionCode']}');
-        print('   - Current approval status: ${currentData['approved']}');
-        print('   - Elderly Name: ${currentData['elderlyName']}');
-        print('   - Current memberIds: ${currentData['memberIds']}');
+        secureLog.operationSuccess('Found family document for approval - Elderly: ${currentData['elderlyName']}, Current approval: ${currentData['approved']}');
         
         // Verify this is the right document
         if (currentData['connectionCode'] != connectionCode) {
@@ -205,7 +191,7 @@ class ChildAppService {
         }
         
         // Use a transaction to atomically add user to memberIds and update approval status
-        print('🔄 Starting transaction to update approval status and membership');
+        secureLog.debug('Starting transaction to update approval status and membership');
         
         final result = await _firestore.runTransaction<bool>((transaction) async {
           // Re-read the document inside the transaction
@@ -231,18 +217,18 @@ class ChildAppService {
           if (approved && !currentMemberIds.contains(currentUser.uid)) {
             currentMemberIds.add(currentUser.uid);
             updateData['memberIds'] = currentMemberIds;
-            print('🔄 Adding user ${currentUser.uid} to family memberIds');
+            secureLog.security('Adding current user to family memberIds');
           }
           
           // Perform the atomic update
           transaction.update(familyDocRef, updateData);
           
-          print('✅ Transaction prepared with updates: ${updateData.keys.join(', ')}');
+          secureLog.debug('Transaction prepared with updates: ${updateData.keys.join(', ')}');
           return true;
         });
         
         if (result) {
-          print('✅ SUCCESS: Family ID $familyId updated with approved: $approved');
+          secureLog.operationSuccess('Family updated with approval status: $approved');
           
           // Verify the update worked by re-reading the document
           final updatedDoc = await _firestore.collection('families').doc(familyId).get();
@@ -251,22 +237,21 @@ class ChildAppService {
             final newApprovalStatus = updatedData['approved'];
             final newMemberIds = List<String>.from(updatedData['memberIds'] ?? []);
             
-            print('✅ VERIFICATION: approved field is now: $newApprovalStatus');
-            print('✅ VERIFICATION: memberIds is now: $newMemberIds');
+            secureLog.debug('VERIFICATION: approved field is now: $newApprovalStatus, memberIds count: ${newMemberIds?.length ?? 0}');
             
             if (newApprovalStatus == approved) {
               if (approved && !newMemberIds.contains(currentUser.uid)) {
-                print('⚠️ WARNING: User was not added to memberIds as expected');
+                secureLog.warning('WARNING: User was not added to memberIds as expected');
               } else {
-                print('🎉 CONFIRMATION: Approval update was successful!');
+                secureLog.operationSuccess('CONFIRMATION: Approval update was successful!');
               }
               return true;
             } else {
-              print('❌ VERIFICATION FAILED: Expected $approved, got $newApprovalStatus');
+              secureLog.error('VERIFICATION FAILED: Expected $approved, got $newApprovalStatus');
               throw Exception('Approval update verification failed');
             }
           } else {
-            print('❌ VERIFICATION FAILED: Document no longer exists');
+            secureLog.error('VERIFICATION FAILED: Document no longer exists');
             throw Exception('Document disappeared after update');
           }
         } else {
@@ -288,12 +273,12 @@ class ChildAppService {
           .get();
       
       if (query.docs.isEmpty) {
-        print('❌ ERROR: Connection code $connectionCode does not exist');
+        secureLog.error('ERROR: Connection code does not exist');
         return [];
       }
       
       final familyId = query.docs.first.id;
-      print('Found family ID: $familyId for connection code: $connectionCode');
+      secureLog.debug('Found family ID for connection code');
       
       final collection = await _firestore
           .collection('families')
@@ -326,7 +311,7 @@ class ChildAppService {
 
       return allRecordings;
     } catch (e) {
-      print('Failed to get recordings: $e');
+      secureLog.error('Failed to get recordings', e);
       return [];
     }
   }
@@ -340,13 +325,13 @@ class ChildAppService {
         .get();
     
     if (query.docs.isEmpty) {
-      print('❌ ERROR: Connection code $connectionCode does not exist');
+      secureLog.error('ERROR: Connection code does not exist');
       yield [];
       return;
     }
     
     final familyId = query.docs.first.id;
-    print('Found family ID: $familyId for connection code: $connectionCode');
+    secureLog.debug('Found family ID for connection code');
     
     await for (final snapshot in _firestore
         .collection('families')
@@ -388,7 +373,7 @@ class ChildAppService {
           .get();
       
       if (query.docs.isEmpty) {
-        print('❌ ERROR: Connection code $connectionCode does not exist');
+        secureLog.error('ERROR: Connection code does not exist');
         return null;
       }
       
@@ -397,11 +382,34 @@ class ChildAppService {
 
       if (doc.exists) {
         final data = doc.data()!;
+        // Parse optimized meal data structure
+        final mealData = data['lastMeal'] as Map<String, dynamic>?;
+        final todayMealCount = mealData?['count'] as int? ?? 0;
+        
+        // Handle timestamp conversion (Firebase returns Timestamp, not String)
+        String? lastMealTime;
+        final mealTimestamp = mealData?['timestamp'];
+        if (mealTimestamp != null) {
+          if (mealTimestamp is Timestamp) {
+            lastMealTime = mealTimestamp.toDate().toIso8601String();
+          } else if (mealTimestamp is String) {
+            lastMealTime = mealTimestamp;
+          }
+        }
+        
+        // Parse optimized alert structure
+        final alerts = data['alerts'] as Map<String, dynamic>?;
+        final survivalAlert = {
+          'isActive': alerts?['survival'] != null,
+          'timestamp': alerts?['survival'],
+          'message': alerts?['survival'] != null ? '장시간 활동 없음' : null,
+        };
+
         return {
-          'lastMealTime': data['lastMealTime'], // Last meal timestamp (cleaned structure)
-          'todayMealCount': data['todayMealCount'], // Today's meal count
-          'survivalAlert': data['survivalAlert'], // Active alert info
-          'lastPhoneActivity': data['lastPhoneActivity'], // General phone activity (any app, calls, etc.)
+          'lastMealTime': lastMealTime, // Last meal timestamp (optimized structure)
+          'todayMealCount': todayMealCount, // Today's meal count (optimized structure)
+          'survivalAlert': survivalAlert, // Active alert info (optimized structure)
+          'lastPhoneActivity': data['blastPhoneActivity'] ?? data['lastPhoneActivity'], // General phone activity (fix field name)
           'lastActive': data['lastActive'], // Our specific app usage
           'elderlyName': data['elderlyName'],
           'location': data['location'], // Location data
@@ -409,7 +417,7 @@ class ChildAppService {
       }
       return null;
     } catch (e) {
-      print('Failed to get survival status: $e');
+      secureLog.error('Failed to get survival status', e);
       return null;
     }
   }
@@ -424,13 +432,13 @@ class ChildAppService {
           .get();
       
       if (query.docs.isEmpty) {
-        print('❌ ERROR: Connection code $connectionCode does not exist');
+        secureLog.error('ERROR: Connection code does not exist');
         yield {};
         return;
       }
       
       final familyId = query.docs.first.id;
-      print('Found family ID: $familyId for connection code: $connectionCode');
+      secureLog.debug('Found family ID for connection code');
       
       await for (final snapshot in _firestore
           .collection('families')
@@ -438,23 +446,48 @@ class ChildAppService {
           .snapshots()) {
         if (snapshot.exists) {
           final data = snapshot.data()!;
+          
+          
+          // Parse optimized meal data structure
+          final mealData = data['lastMeal'] as Map<String, dynamic>?;
+          final todayMealCount = mealData?['count'] as int? ?? 0;
+          
+          // Handle timestamp conversion (Firebase returns Timestamp, not String)
+          String? lastMealTime;
+          final mealTimestamp = mealData?['timestamp'];
+          if (mealTimestamp != null) {
+            if (mealTimestamp is Timestamp) {
+              lastMealTime = mealTimestamp.toDate().toIso8601String();
+            } else if (mealTimestamp is String) {
+              lastMealTime = mealTimestamp;
+            }
+          }
+          
+          // Parse optimized alert structure
+          final alerts = data['alerts'] as Map<String, dynamic>?;
+          final survivalAlert = {
+            'isActive': alerts?['survival'] != null,
+            'timestamp': alerts?['survival'],
+            'message': alerts?['survival'] != null ? '장시간 활동 없음' : null,
+          };
+          
           yield {
-            'lastMealTime': data['lastMealTime'], // Last meal timestamp (cleaned structure)
-            'todayMealCount': data['todayMealCount'], // Today's meal count
-            'survivalAlert': data['survivalAlert'], // Alert details if triggered
-            'lastPhoneActivity': data['lastPhoneActivity'], // General phone activity (any app, calls, etc.)
+            'lastMealTime': lastMealTime, // Last meal timestamp (optimized structure)
+            'todayMealCount': todayMealCount, // Today's meal count (optimized structure)
+            'survivalAlert': survivalAlert, // Alert details if triggered (optimized structure)
+            'lastPhoneActivity': data['blastPhoneActivity'] ?? data['lastPhoneActivity'], // General phone activity (fix field name)
             'lastActive': data['lastActive'], // Our specific app usage
             'elderlyName': data['elderlyName'],
             'settings': data['settings'], // App settings
             'location': data['location'], // Location data
           };
         } else {
-          print('Family document deleted: $familyId');
+          secureLog.warning('Family document deleted');
           yield {};
         }
       }
     } catch (e) {
-      print('Error in listenToSurvivalStatus: $e');
+      secureLog.error('Error in listenToSurvivalStatus', e);
       yield {};
     }
   }
@@ -469,20 +502,20 @@ class ChildAppService {
           .get();
       
       if (query.docs.isEmpty) {
-        print('❌ ERROR: Connection code $connectionCode does not exist');
+        secureLog.error('ERROR: Connection code does not exist');
         return false;
       }
       
       final familyId = query.docs.first.id;
       
       await _firestore.collection('families').doc(familyId).update({
-        'survivalAlert.isActive': false,
-        'survivalAlert.clearedAt': FieldValue.serverTimestamp(),
-        'survivalAlert.clearedBy': 'Child App',
+        'alerts.survival': null, // Clear survival alert (optimized structure)
+        'alertsCleared.survival': FieldValue.serverTimestamp(),
+        'alertsClearedBy.survival': 'Child App',
       });
       return true;
     } catch (e) {
-      print('Failed to clear survival alert: $e');
+      secureLog.error('Failed to clear survival alert', e);
       return false;
     }
   }
@@ -498,7 +531,7 @@ class ChildAppService {
           .get();
       
       if (query.docs.isEmpty) {
-        print('❌ ERROR: Connection code $connectionCode does not exist');
+        secureLog.error('ERROR: Connection code does not exist');
         return false;
       }
       
@@ -512,7 +545,7 @@ class ChildAppService {
       await _firestore.collection('families').doc(familyId).update(updateData);
       return true;
     } catch (e) {
-      print('Failed to update settings: $e');
+      secureLog.error('Failed to update settings', e);
       return false;
     }
   }
@@ -529,7 +562,7 @@ class ChildAppService {
           .get();
       
       if (query.docs.isEmpty) {
-        print('❌ ERROR: Connection code $connectionCode does not exist');
+        secureLog.error('ERROR: Connection code does not exist');
         return {};
       }
       
@@ -559,7 +592,7 @@ class ChildAppService {
         'averagePerDay': daysWithRecordings > 0 ? totalRecordings / daysWithRecordings : 0,
       };
     } catch (e) {
-      print('Failed to get statistics: $e');
+      secureLog.error('Failed to get statistics', e);
       return {};
     }
   }
@@ -567,27 +600,44 @@ class ChildAppService {
   /// Check if family document still exists (for account deletion detection)
   /// Returns null if network error, true/false if successful check
   Future<bool?> checkFamilyExists(String connectionCode) async {
-    print('🔍 Checking if family exists for code: $connectionCode');
+    secureLog.debug('Checking if family exists for connection code');
     
-    final result = await _executeWithRetry<bool>(
-      () async {
-        final query = await _firestore.collection('families')
-            .where('connectionCode', isEqualTo: connectionCode)
-            .limit(1)
-            .get();
-        
-        final exists = query.docs.isNotEmpty;
-        print('📊 Family exists check result: $exists');
-        return exists;
-      },
-      operationName: 'checkFamilyExists',
-    );
-    
-    if (result == null) {
-      print('⚠️ checkFamilyExists failed due to network/connection issues');
+    try {
+      final result = await _executeWithRetry<bool>(
+        () async {
+          final query = await _firestore.collection('families')
+              .where('connectionCode', isEqualTo: connectionCode)
+              .limit(1)
+              .get();
+          
+          final exists = query.docs.isNotEmpty;
+          if (exists) {
+            secureLog.info('Family found for connection code');
+            // Additional validation: check if document has basic required fields
+            final doc = query.docs.first;
+            final data = doc.data();
+            final hasRequiredFields = data.containsKey('elderlyName') || data.containsKey('createdAt');
+            if (!hasRequiredFields) {
+              secureLog.warning('Family document exists but missing required fields');
+              return false; // Treat as deleted if document is corrupted
+            }
+          } else {
+            secureLog.warning('No family found for connection code - may be deleted');
+          }
+          return exists;
+        },
+        operationName: 'checkFamilyExists',
+      );
+      
+      if (result == null) {
+        secureLog.warning('checkFamilyExists failed due to network/connection issues');
+      }
+      
+      return result;
+    } catch (e) {
+      secureLog.error('Exception in checkFamilyExists', e);
+      return null; // Return null to indicate network/connection problem, not deletion
     }
-    
-    return result; // Return null for network errors, true/false for actual results
   }
 
   /// Stream to monitor family document existence
@@ -600,13 +650,13 @@ class ChildAppService {
           .get();
       
       if (query.docs.isEmpty) {
-        print('Family document not found for connection code: $connectionCode');
+        secureLog.warning('Family document not found for connection code');
         yield false;
         return;
       }
       
       final familyId = query.docs.first.id;
-      print('Monitoring family document existence for ID: $familyId');
+      secureLog.debug('Monitoring family document existence');
       
       // Start with true - assume family exists until proven otherwise
       bool lastKnownState = true;
@@ -620,7 +670,7 @@ class ChildAppService {
         // Check if this is a metadata-only change (network status change)
         if (snapshot.metadata.hasPendingWrites || 
             snapshot.metadata.isFromCache) {
-          print('📡 Metadata change detected - from cache: ${snapshot.metadata.isFromCache}, pending writes: ${snapshot.metadata.hasPendingWrites}');
+          secureLog.debug('Metadata change detected - from cache: ${snapshot.metadata.isFromCache}, pending writes: ${snapshot.metadata.hasPendingWrites}');
           // Don't yield false for network/cache issues - keep last known state
           continue;
         }
@@ -629,23 +679,23 @@ class ChildAppService {
         
         // Only yield changes if the existence state actually changed
         if (currentExists != lastKnownState) {
-          print('📊 Family existence changed from $lastKnownState to $currentExists');
+          secureLog.info('Family existence changed from $lastKnownState to $currentExists');
           lastKnownState = currentExists;
           yield currentExists;
           
           if (!currentExists) {
-            print('❌ Family document actually deleted: $familyId');
+            secureLog.warning('Family document actually deleted');
           } else {
-            print('✅ Family document restored/created: $familyId');
+            secureLog.info('Family document restored/created');
           }
         } else {
-          print('📡 No change in family existence state: $currentExists');
+          secureLog.debug('No change in family existence state: $currentExists');
         }
       }
     } catch (e) {
-      print('❌ Error monitoring family existence: $e');
+      secureLog.error('Error monitoring family existence', e);
       // Don't yield false on errors - this could be network issues
-      print('⚠️ Network error in family monitoring - not yielding false to prevent incorrect account deletion');
+      secureLog.warning('Network error in family monitoring - not yielding false to prevent incorrect account deletion');
     }
   }
   
@@ -655,7 +705,7 @@ class ChildAppService {
       subscription.cancel();
     }
     _activeListeners.clear();
-    print('✅ ChildAppService disposed - all listeners cancelled');
+    secureLog.info('ChildAppService disposed - all listeners cancelled');
   }
   
   /// Get connection status

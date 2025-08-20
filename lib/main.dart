@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_options.dart';
 import 'screens/family_setup_screen.dart';
 import 'screens/home_screen.dart';
@@ -15,6 +16,7 @@ import 'models/family_record.dart';
 import 'theme/app_theme.dart';
 import 'utils/app_lifecycle_handler.dart';
 import 'utils/connectivity_checker.dart';
+import 'utils/secure_logger.dart';
 
 void main() {
   runApp(const LoveEverydayApp());
@@ -65,10 +67,13 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
     try {
       WidgetsFlutterBinding.ensureInitialized();
       
+      // Initialize secure logging first
+      secureLog.initialize();
+      
       // Check network connectivity first
       final connectivityStatus = await _connectivityChecker.checkConnectivity();
       if (connectivityStatus == ConnectivityStatus.disconnected) {
-        print('No network connection, waiting for connectivity...');
+        secureLog.warning('No network connection, waiting for connectivity');
         final hasConnection = await _connectivityChecker.waitForConnection(
           timeout: const Duration(seconds: 15),
         );
@@ -82,17 +87,36 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
       // Initialize FCM message service
       try {
         await FCMMessageService.initialize();
-        print('✅ FCM Message Service initialized successfully');
+        secureLog.info('FCM Message Service initialized successfully');
         
         // Request notification permissions
         final permissionGranted = await FCMTokenService.requestPermissions();
-        print('🔔 Notification permissions granted: $permissionGranted');
+        secureLog.info('Notification permissions granted: $permissionGranted');
         
         // Set up token refresh listener
         FCMTokenService.setupTokenRefreshListener();
-        print('🔄 FCM token refresh listener setup complete');
+        secureLog.info('FCM token refresh listener setup complete');
+        
+        // Set up FCM message handling for debugging
+        FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+          print('🔥 FIREBASE: Received foreground message: ${message.messageId}');
+          print('🔥 FIREBASE: Title: ${message.notification?.title}');
+          print('🔥 FIREBASE: Body: ${message.notification?.body}');
+          print('🔥 FIREBASE: Data: ${message.data}');
+        });
+        
+        FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+          print('🔥 FIREBASE: App opened from notification: ${message.messageId}');
+          print('🔥 FIREBASE: Data: ${message.data}');
+        });
+        
+        // Check for initial message when app was opened from notification
+        RemoteMessage? initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+        if (initialMessage != null) {
+          print('🔥 FIREBASE: App launched from notification: ${initialMessage.messageId}');
+        }
       } catch (e) {
-        print('⚠️ FCM initialization failed: $e');
+        secureLog.error('FCM initialization failed', e);
       }
 
       // FCM and Firebase are now initialized
@@ -101,9 +125,9 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
         // Initialize AuthService to set up proper authentication state
         final authService = AuthService();
         await authService.initialize();
-        print('✅ AuthService initialized successfully');
+        secureLog.info('AuthService initialized successfully');
       } catch (e) {
-        print('⚠️ AuthService initialization failed, but continuing: $e');
+        secureLog.warning('AuthService initialization failed, but continuing', e);
       }
 
       // Initialize other services after Firebase is ready
@@ -117,7 +141,7 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
         _isInitialized = true;
       });
     } catch (e) {
-      print('Firebase initialization failed: $e');
+      secureLog.error('Firebase initialization failed', e);
       setState(() {
         _hasError = true;
         _errorMessage = e.toString();
@@ -236,7 +260,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         
         // Handle connection errors or auth failures
         if (snapshot.hasError) {
-          print('Auth stream error: ${snapshot.error}');
+          secureLog.error('Auth stream error', snapshot.error);
           return _buildErrorRecoveryWidget(snapshot.error.toString());
         }
         
@@ -246,11 +270,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
           
           // Check if user is properly authenticated (not anonymous)
           if (user.isAnonymous) {
-            print('⚠️ WARNING: User is anonymous, redirecting to login');
+            secureLog.warning('WARNING: User is anonymous, redirecting to login');
             return const LoginScreen();
           }
           
-          print('✅ User properly authenticated: ${user.email ?? user.uid}');
+          secureLog.security('User properly authenticated');
           return const AuthenticatedApp();
         }
         
@@ -348,23 +372,62 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
       final sessionRestored = await sessionManager.restoreSession();
       
       if (sessionRestored && sessionManager.hasValidSession) {
-        print('✅ Session restored from storage');
+        secureLog.info('Session restored from storage');
         final familyCode = sessionManager.currentFamilyCode!;
         final cachedData = sessionManager.cachedFamilyData;
         
-        // Validate session is still good
+        // Validate session is still good - but be more forgiving about network issues
         final childService = ChildAppService();
-        final familyExists = await childService.checkFamilyExists(familyCode);
         
-        if (familyExists == true) {
-          // Create FamilyInfo from cached data
+        try {
+          final familyExists = await childService.checkFamilyExists(familyCode);
+          
+          if (familyExists == true) {
+            // Family exists - proceed to home
+            final familyInfo = FamilyInfo.fromMap({
+              'familyCode': familyCode,
+              'elderlyName': cachedData?['elderlyName'] ?? '',
+              'createdAt': cachedData?['createdAt'],
+              'lastMealTime': cachedData?['lastMealTime'], // Handled in child_app_service.dart parsing
+              'isActive': cachedData?['isActive'] ?? false,
+              'deviceInfo': _extractDeviceInfo(cachedData?['deviceInfo']),
+            });
+            
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              AppTheme.slideTransition(
+                page: HomeScreen(familyCode: familyCode, familyInfo: familyInfo),
+              ),
+            );
+            return;
+          } else if (familyExists == false) {
+            // Only show account deleted if we're absolutely sure (not network error)
+            secureLog.warning('Family definitively does not exist - showing account deleted');
+            await sessionManager.clearSession();
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              AppTheme.fadeTransition(page: const AccountDeletedScreen()),
+            );
+            return;
+          }
+          // If familyExists == null (network error), continue with normal flow and try cached data
+        } catch (e) {
+          // Network or Firebase error - don't assume account is deleted
+          secureLog.warning('Error checking family existence, continuing with cached data: $e');
+        }
+        
+        // If we have cached data but network check failed, still try to proceed with cached data
+        if (cachedData != null && cachedData['elderlyName'] != null) {
+          secureLog.info('Using cached data due to network issues');
           final familyInfo = FamilyInfo.fromMap({
             'familyCode': familyCode,
-            'elderlyName': cachedData?['elderlyName'] ?? '',
-            'createdAt': cachedData?['createdAt'],
-            'lastMealTime': cachedData?['lastMealTime'],
-            'isActive': cachedData?['isActive'] ?? false,
-            'deviceInfo': _extractDeviceInfo(cachedData?['deviceInfo']),
+            'elderlyName': cachedData['elderlyName'] ?? '',
+            'createdAt': cachedData['createdAt'],
+            'lastMealTime': cachedData['lastMealTime'],
+            'isActive': cachedData['isActive'] ?? false,
+            'deviceInfo': _extractDeviceInfo(cachedData['deviceInfo']),
           });
           
           if (!mounted) return;
@@ -375,39 +438,26 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
             ),
           );
           return;
-        } else if (familyExists == false) {
-          // Family deleted
-          await sessionManager.clearSession();
-          if (!mounted) return;
-          Navigator.pushReplacement(
-            context,
-            AppTheme.fadeTransition(page: const AccountDeletedScreen()),
-          );
-          return;
         }
-        // If familyExists == null (network error), continue with normal flow
       }
       
       // Fallback to user profile check
       final currentUser = authService.currentUser;
-      print('🔍 Checking user profile for family codes...');
-      print('👤 Current user: ${currentUser?.email ?? currentUser?.uid ?? 'null'}');
+      secureLog.debug('Checking user profile for family codes');
       
       final userProfile = await authService.getUserProfile();
       
       if (userProfile != null) {
-        print('✅ User profile found: ${userProfile.keys}');
-        print('📊 Full profile data: $userProfile');
+        secureLog.debug('User profile found with keys: ${userProfile.keys}');
         
         if (userProfile['familyCodes'] != null) {
           final familyCodes = List<String>.from(userProfile['familyCodes']);
-          print('📱 Family codes in profile: $familyCodes (count: ${familyCodes.length})');
+          secureLog.debug('Family codes in profile (count: ${familyCodes.length})');
           
           if (familyCodes.isNotEmpty) {
             // Use the first (most recent) family code
             final familyCode = familyCodes.first;
-            print('🔑 Using family code: $familyCode');
-            print('💾 Family code CONFIRMED in user profile - should persist across sessions');
+            secureLog.security('Using family code from profile - should persist across sessions');
             
             // Start session with this family code
             await sessionManager.startSession(familyCode, null);
@@ -418,8 +468,7 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
 
             if (familyExists == null) {
               // Network error - show retry dialog instead of account deletion
-              print('⚠️ Network error checking family existence - KEEPING code in profile');
-              print('Family code preserved: $familyCode');
+              secureLog.warning('Network error checking family existence - KEEPING code in profile');
               if (!mounted) return;
               final shouldRetry = await _showProfileRetryDialog();
               
@@ -428,7 +477,7 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
                 return;
               } else {
                 // User chose to re-enter family code - but DON'T remove existing code
-                print('📝 User chose family setup but preserving existing code: $familyCode');
+                secureLog.info('User chose family setup but preserving existing family code');
                 Navigator.pushReplacement(
                   context,
                   AppTheme.slideTransition(page: const FamilySetupScreen()),
@@ -439,7 +488,7 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
 
             if (familyExists == false) {
               // Family actually deleted - remove from user profile
-              print('❌ Family was actually deleted by parent app');
+              secureLog.warning('Family was actually deleted by parent app');
               await authService.removeFamilyCode(familyCode);
               if (!mounted) return;
               Navigator.pushReplacement(
@@ -452,9 +501,7 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
             final familyData = await childService.getFamilyInfo(familyCode);
             if (familyData != null && familyData['approved'] == true) {
               // Valid and approved family code
-              print('🔍 Raw family data: $familyData');
-              print('📊 Family data keys: ${familyData.keys.toList()}');
-              print('📊 Family data types: ${familyData.map((key, value) => MapEntry(key, value.runtimeType))}');
+              secureLog.debug('Raw family data keys: ${familyData.keys.toList()}');
               
               // Update session with family data
               await sessionManager.startSession(familyCode, familyData);
@@ -464,19 +511,25 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
                 'familyCode': familyCode,
                 'elderlyName': familyData['elderlyName'] ?? '',
                 'createdAt': familyData['createdAt'],
-                'lastMealTime': familyData['lastMealTime'],
+                'lastMealTime': familyData['lastMealTime'], // Handled in child_app_service.dart parsing
                 'isActive': familyData['isActive'] ?? false,
                 'deviceInfo': _extractDeviceInfo(familyData['deviceInfo']),
               });
 
-              // Register FCM token
+              // Register FCM token for existing connections
               final familyId = familyData['familyId'] as String?;
               if (familyId != null) {
-                Future.delayed(const Duration(seconds: 2), () async {
+                Future.delayed(const Duration(seconds: 1), () async {
                   try {
-                    await FCMTokenService.registerChildToken(familyId);
+                    print('🔔 Registering FCM token for existing family connection: $familyId');
+                    final registered = await FCMTokenService.registerChildToken(familyId);
+                    if (registered) {
+                      print('✅ FCM token registered for existing family');
+                    } else {
+                      print('⚠️ FCM token registration failed for existing family');
+                    }
                   } catch (e) {
-                    // Handle FCM token registration error silently
+                    print('❌ Failed to register FCM token for existing family: $e');
                   }
                 });
               }
@@ -492,8 +545,7 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
               return;
             } else {
               // Family code exists but not approved or network error - DON'T remove from profile
-              print('⚠️ Family code exists but not approved or network error - keeping code in profile');
-              print('Family data: $familyData');
+              secureLog.warning('Family code exists but not approved or network error - keeping code in profile');
               
               // Show retry dialog instead of removing family code
               if (!mounted) return;
@@ -506,13 +558,13 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
               // If user chooses not to retry, go to family setup but DON'T remove code
             }
           } else {
-            print('❌ No family codes found in user profile');
+            secureLog.warning('No family codes found in user profile');
           }
         } else {
-          print('❌ familyCodes field is null in user profile');
+          secureLog.warning('familyCodes field is null in user profile');
         }
       } else {
-        print('❌ No user profile found - this might be a network issue');
+        secureLog.warning('No user profile found - this might be a network issue');
         
         // Show retry dialog instead of immediately going to family setup
         if (!mounted) return;
@@ -532,7 +584,7 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
         AppTheme.slideTransition(page: const FamilySetupScreen()),
       );
     } catch (e) {
-      print('❌ Error during app initialization: $e');
+      secureLog.error('Error during app initialization', e);
       
       // Show retry option for network/connection errors
       if (!mounted) return;

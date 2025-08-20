@@ -3,6 +3,7 @@ import '../models/family_record.dart';
 import '../services/auth_service.dart';
 import '../services/child_app_service.dart';
 import '../services/fcm_token_service.dart';
+import '../services/session_manager.dart';
 import '../constants/colors.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
@@ -216,6 +217,12 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
                   
                   // Save family code to user profile
                   await _authService.addFamilyCode(code);
+                  
+                  // Save session data for persistence
+                  final sessionManager = SessionManager();
+                  await sessionManager.initialize();
+                  await sessionManager.saveSession(code, familyData);
+                  print('💾 Session saved with familyId: ${familyData['familyId']}');
                   
                   // Register FCM token for this family
                   final familyId = familyData['familyId'] as String?;

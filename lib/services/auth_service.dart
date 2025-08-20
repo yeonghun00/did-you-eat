@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'dart:async';
+import '../utils/secure_logger.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -36,19 +37,19 @@ class AuthService {
       if (kIsWeb) {
         try {
           await _auth.setPersistence(Persistence.LOCAL);
-          print('✅ Firebase Auth web persistence set');
+          secureLog.info('Firebase Auth web persistence set');
         } catch (e) {
-          print('⚠️ Firebase Auth web persistence failed: $e');
+          secureLog.warning('Firebase Auth web persistence failed', e);
         }
       } else {
-        print('✅ Mobile platform - Firebase Auth persistence is automatic');
+        secureLog.info('Mobile platform - Firebase Auth persistence is automatic');
       }
       
       // Set up auth state listener with automatic recovery
       _authStateSubscription = _auth.authStateChanges().listen(
         _handleAuthStateChange,
         onError: (error) {
-          print('Auth state error: $error');
+          secureLog.error('Auth state error', error);
           _attemptTokenRefresh();
         },
       );
@@ -60,25 +61,25 @@ class AuthService {
       if (!kIsWeb) {
         try {
           await _firestore.enablePersistence();
-          print('✅ Firestore offline persistence enabled');
+          secureLog.info('Firestore offline persistence enabled');
         } catch (e) {
-          print('⚠️ Firestore persistence already enabled or failed: $e');
+          secureLog.warning('Firestore persistence already enabled or failed', e);
         }
       } else {
         try {
           await _firestore.enablePersistence(
             const PersistenceSettings(synchronizeTabs: true),
           );
-          print('✅ Firestore web persistence enabled');
+          secureLog.info('Firestore web persistence enabled');
         } catch (e) {
-          print('⚠️ Firestore web persistence already enabled or failed: $e');
+          secureLog.warning('Firestore web persistence already enabled or failed', e);
         }
       }
       
       _isInitialized = true;
-      print('✅ AuthService initialized with platform-appropriate persistence');
+      secureLog.info('AuthService initialized with platform-appropriate persistence');
     } catch (e) {
-      print('❌ AuthService initialization failed: $e');
+      secureLog.error('AuthService initialization failed', e);
       // Don't let persistence failures block initialization
       _isInitialized = true;
     }

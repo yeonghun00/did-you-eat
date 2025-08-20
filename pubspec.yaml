@@ -68,6 +68,9 @@ dependencies:
   
   # Background and persistence  
   connectivity_plus: ^6.0.5
+  
+  # Logging
+  logger: ^2.6.0
 
 dev_dependencies:
   flutter_test:

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import '../utils/secure_logger.dart';
 
 /// Simple session manager to maintain family connection across app restarts
 class SessionManager {
@@ -21,9 +22,9 @@ class SessionManager {
   Future<void> initialize() async {
     try {
       _prefs = await SharedPreferences.getInstance();
-      print('✅ SessionManager initialized');
+      secureLog.info('SessionManager initialized');
     } catch (e) {
-      print('❌ Failed to initialize SessionManager: $e');
+      secureLog.error('Failed to initialize SessionManager', e);
     }
   }
 
@@ -39,9 +40,9 @@ class SessionManager {
       }
       await _prefs?.setInt(_sessionTimestampKey, DateTime.now().millisecondsSinceEpoch);
       
-      print('✅ Session started with family code: $familyCode');
+      secureLog.security('Session started with family connection');
     } catch (e) {
-      print('❌ Failed to start session: $e');
+      secureLog.error('Failed to start session', e);
     }
   }
 
@@ -56,14 +57,30 @@ class SessionManager {
           _cachedFamilyData = jsonDecode(familyDataJson) as Map<String, dynamic>;
         }
         
-        print('✅ Session restored with family code: $_currentFamilyCode');
+        secureLog.security('Session restored with family connection');
         return true;
       }
       
       return false;
     } catch (e) {
-      print('❌ Failed to restore session: $e');
+      secureLog.error('Failed to restore session', e);
       return false;
+    }
+  }
+
+  /// Save session with family data
+  Future<void> saveSession(String familyCode, Map<String, dynamic> familyData) async {
+    try {
+      _currentFamilyCode = familyCode;
+      _cachedFamilyData = familyData;
+      
+      await _prefs?.setString(_familyCodeKey, familyCode);
+      await _prefs?.setString(_familyDataKey, jsonEncode(familyData));
+      await _prefs?.setInt(_sessionTimestampKey, DateTime.now().millisecondsSinceEpoch);
+      
+      secureLog.info('Session saved successfully for family code');
+    } catch (e) {
+      secureLog.error('Failed to save session', e);
     }
   }
 
@@ -77,9 +94,9 @@ class SessionManager {
       await _prefs?.remove(_familyDataKey);
       await _prefs?.remove(_sessionTimestampKey);
       
-      print('✅ Session cleared');
+      secureLog.info('Session cleared');
     } catch (e) {
-      print('❌ Failed to clear session: $e');
+      secureLog.error('Failed to clear session', e);
     }
   }
 

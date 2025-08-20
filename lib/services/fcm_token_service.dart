@@ -1,7 +1,9 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'dart:io';
+import 'session_manager.dart';
 
 class FCMTokenService {
   static const String _deviceIdKey = 'unique_device_id';
@@ -44,7 +46,15 @@ class FCMTokenService {
       print('  Device ID: $deviceId');
       print('  FCM Token: ${fcmToken.substring(0, 20)}...');
 
+      // Get current user ID
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final userId = currentUser?.uid ?? 'anonymous';
+      
+      print('  User ID: $userId');
+
       // Register with parent app's Firestore structure
+      print('🔥 FIREBASE: Attempting to write to families/$familyId/child_devices/$deviceId');
+      
       await FirebaseFirestore.instance
           .collection('families')
           .doc(familyId)
@@ -54,10 +64,15 @@ class FCMTokenService {
         'fcm_token': fcmToken,
         'device_id': deviceId,
         'device_name': deviceName,
+        'user_id': userId,
         'is_active': true,
         'registered_at': FieldValue.serverTimestamp(),
         'last_updated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+      
+      print('🔥 FIREBASE: Successfully wrote FCM token to Firestore');
+      print('🔥 FIREBASE: Path: families/$familyId/child_devices/$deviceId');
+      print('🔥 FIREBASE: FCM Token registered: ${fcmToken.substring(0, 30)}...');
 
       print('✅ FCM token registered successfully to Firestore');
       return true;
@@ -204,15 +219,54 @@ class FCMTokenService {
     });
   }
 
-  /// Get stored family ID (implement based on your storage method)
+  /// Get stored family ID from session manager
   static Future<String?> _getStoredFamilyId() async {
     try {
-      // This should be implemented based on how you store family data
-      // For now, we'll need to get it from SharedPreferences or similar
-      return null; // Placeholder - implement based on your app's data storage
+      final sessionManager = SessionManager();
+      await sessionManager.initialize();
+      
+      if (sessionManager.hasValidSession) {
+        final familyCode = sessionManager.currentFamilyCode;
+        final cachedData = sessionManager.cachedFamilyData;
+        final familyId = cachedData?['familyId'] as String?;
+        
+        print('🔍 Found stored family ID: $familyId for family code: $familyCode');
+        return familyId;
+      }
+      
+      print('⚠️ No valid session found for FCM token refresh');
+      return null;
     } catch (e) {
       print('❌ Failed to get stored family ID: $e');
       return null;
+    }
+  }
+
+  /// Debug method to manually trigger FCM registration for current session
+  static Future<bool> debugRegisterForCurrentSession() async {
+    try {
+      print('🐛 DEBUG: Starting manual FCM registration...');
+      
+      final sessionManager = SessionManager();
+      await sessionManager.initialize();
+      
+      print('🐛 DEBUG: Session valid: ${sessionManager.hasValidSession}');
+      print('🐛 DEBUG: Family code: ${sessionManager.currentFamilyCode}');
+      print('🐛 DEBUG: Cached data keys: ${sessionManager.cachedFamilyData?.keys.toList()}');
+      
+      final familyId = await _getStoredFamilyId();
+      if (familyId != null) {
+        print('🐛 DEBUG: Found family ID: $familyId');
+        print('🐛 DEBUG: Manually triggering FCM registration for family: $familyId');
+        return await registerChildToken(familyId);
+      } else {
+        print('🐛 DEBUG: No family ID found for FCM registration');
+        print('🐛 DEBUG: Please reconnect to family or check session data');
+        return false;
+      }
+    } catch (e) {
+      print('🐛 DEBUG: Failed to register FCM token: $e');
+      return false;
     }
   }
 }

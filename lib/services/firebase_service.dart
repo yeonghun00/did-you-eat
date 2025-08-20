@@ -254,8 +254,12 @@ class FirebaseService {
     try {
       // Try to get from family document first (more efficient)
       final familyData = await getFamilyDataForChild(connectionCode);
-      if (familyData != null && familyData['todayMealCount'] != null) {
-        return familyData['todayMealCount'] as int;
+      if (familyData != null) {
+        final mealData = familyData['lastMeal'] as Map<String, dynamic>?;
+        final todayMealCount = mealData?['count'] as int?;
+        if (todayMealCount != null) {
+          return todayMealCount;
+        }
       }
       
       // Fallback to querying meals collection
@@ -307,12 +311,12 @@ class FirebaseService {
         );
       }
       
-      // 생존 신호 확인 (survivalAlert 기반 - parent app native monitoring)
-      final survivalAlert = familyData['survivalAlert'] as Map<String, dynamic>?;
+      // 생존 신호 확인 (alerts 기반 - parent app native monitoring, optimized structure)
+      final alerts = familyData['alerts'] as Map<String, dynamic>?;
       final isActive = familyData['isActive'] as bool? ?? false;
       
       // 생존 알림이 활성화된 경우
-      if (survivalAlert?['isActive'] == true) {
+      if (alerts?['survival'] != null) {
         return ParentStatusInfo(
           status: ParentStatus.emergency,
           daysSinceLastRecord: 0,
@@ -329,16 +333,23 @@ class FirebaseService {
         );
       }
       
-      // 오늘 식사 기록 확인 (use cached data first)
-      final todayMealCount = familyData['todayMealCount'] as int? ?? 0;
-      final lastMealTime = familyData['lastMealTime'] as String?;
+      // 오늘 식사 기록 확인 (use cached data first from optimized structure)
+      final mealData = familyData['lastMeal'] as Map<String, dynamic>?;
+      final todayMealCount = mealData?['count'] as int? ?? 0;
+      
+      // Handle timestamp conversion (Firebase returns Timestamp, not String)
+      DateTime? lastMealDateTime;
+      final mealTimestamp = mealData?['timestamp'];
+      if (mealTimestamp != null) {
+        if (mealTimestamp is Timestamp) {
+          lastMealDateTime = mealTimestamp.toDate();
+        } else if (mealTimestamp is String) {
+          lastMealDateTime = DateTime.parse(mealTimestamp);
+        }
+      }
       
       if (todayMealCount > 0) {
         print('Found today meals: $todayMealCount meals');
-        DateTime? lastMealDateTime;
-        if (lastMealTime != null) {
-          lastMealDateTime = DateTime.parse(lastMealTime);
-        }
         
         return ParentStatusInfo(
           status: ParentStatus.normal,
@@ -348,14 +359,14 @@ class FirebaseService {
         );
       }
 
-      // 최근 식사 기록 찾기 (check lastMealTime from family doc first)
+      // 최근 식사 기록 찾기 (check lastMealDateTime from family doc first)
       DateTime? lastMealDate;
       int daysBack = 1;
       bool hasAnyMeals = false;
       
-      // First check if we have lastMealTime in family document
-      if (lastMealTime != null) {
-        lastMealDate = DateTime.parse(lastMealTime);
+      // First check if we have lastMealDateTime in family document
+      if (lastMealDateTime != null) {
+        lastMealDate = lastMealDateTime;
         final daysSinceLastMeal = now.difference(lastMealDate).inDays;
         if (daysSinceLastMeal == 0) {
           // Same day, already handled above
