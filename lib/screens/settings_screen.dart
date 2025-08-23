@@ -24,11 +24,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final AuthService _authService = AuthService();
   final TextEditingController _hoursController = TextEditingController();
   int _survivalAlertHours = 12;
+  String? _elderlyName;
+  bool _isLoadingFamilyInfo = true;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _loadFamilyInfo();
   }
 
   Future<void> _loadSettings() async {
@@ -40,6 +43,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     } catch (e) {
       print('Error loading settings: $e');
+    }
+  }
+
+  Future<void> _loadFamilyInfo() async {
+    if (widget.familyCode == null) {
+      setState(() {
+        _elderlyName = null;
+        _isLoadingFamilyInfo = false;
+      });
+      return;
+    }
+
+    try {
+      // Try to get family info from ChildAppService
+      final familyData = await _childService.getFamilyInfo(widget.familyCode!);
+      
+      if (familyData != null && mounted) {
+        setState(() {
+          _elderlyName = familyData['elderlyName'] ?? '';
+          _isLoadingFamilyInfo = false;
+        });
+        print('Family info loaded: elderlyName = $_elderlyName');
+      } else if (mounted) {
+        setState(() {
+          _elderlyName = widget.familyInfo?.elderlyName;
+          _isLoadingFamilyInfo = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading family info: $e');
+      if (mounted) {
+        setState(() {
+          _elderlyName = widget.familyInfo?.elderlyName;
+          _isLoadingFamilyInfo = false;
+        });
+      }
     }
   }
 
@@ -463,7 +502,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildInfoItem(
                 icon: Icons.family_restroom,
                 title: '부모님 이름',
-                value: widget.familyInfo?.elderlyName ?? '연결 정보 없음',
+                value: _isLoadingFamilyInfo 
+                    ? '정보 로딩 중...' 
+                    : (_elderlyName?.isNotEmpty == true 
+                        ? _elderlyName! 
+                        : (widget.familyInfo?.elderlyName?.isNotEmpty == true 
+                            ? widget.familyInfo!.elderlyName 
+                            : '연결 정보 없음')),
               ),
               _buildInfoItem(
                 icon: Icons.code,

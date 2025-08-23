@@ -474,6 +474,53 @@ class FirebaseService {
     });
   }
 
+  /// Store location data for a family
+  /// 
+  /// [connectionCode] - Family connection code
+  /// [latitude] - Location latitude
+  /// [longitude] - Location longitude
+  /// [address] - Optional address string
+  /// [timestamp] - Optional timestamp (defaults to now)
+  /// 
+  /// Returns true if successful, false otherwise
+  static Future<bool> storeLocation({
+    required String connectionCode,
+    required double latitude,
+    required double longitude,
+    String? address,
+    DateTime? timestamp,
+  }) async {
+    try {
+      final familyId = await getFamilyIdFromConnectionCode(connectionCode);
+      if (familyId == null) {
+        print('Could not resolve family ID for connection code: $connectionCode');
+        return false;
+      }
+      
+      timestamp ??= DateTime.now();
+      
+      // Create location data structure
+      final locationData = {
+        'latitude': latitude,
+        'longitude': longitude,
+        'timestamp': timestamp.toIso8601String(),
+        if (address != null) 'address': address,
+      };
+      
+      // Store in Firebase
+      await _firestore.collection('families').doc(familyId).update({
+        'location': locationData,
+        'lastLocationUpdate': FieldValue.serverTimestamp(),
+      });
+      
+      print('Successfully stored location for family: $familyId');
+      return true;
+    } catch (e) {
+      print('Error storing location: $e');
+      return false;
+    }
+  }
+
   /// Clear family ID cache (useful for testing or when family changes)
   static void clearFamilyIdCache() {
     _familyIdCache.clear();

@@ -3,13 +3,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'firebase_service.dart';
 
-/// ParentLocationService handles location collection and encrypted storage
+/// ParentLocationService handles location collection and storage
 /// for the elderly/parent app side
 /// 
 /// Features:
 /// - Collects GPS location data with proper permissions
 /// - Reverse geocoding for address resolution
-/// - Automatic encrypted storage to Firebase
+/// - Automatic storage to Firebase
 /// - Periodic location updates
 /// - Battery-optimized location tracking
 /// - Location permission handling
@@ -207,8 +207,8 @@ class ParentLocationService {
         // Continue without address
       }
       
-      // Store encrypted location data
-      final success = await FirebaseService.storeEncryptedLocation(
+      // Store location data
+      final success = await FirebaseService.storeLocation(
         connectionCode: _currentConnectionCode!,
         latitude: position.latitude,
         longitude: position.longitude,
@@ -217,9 +217,9 @@ class ParentLocationService {
       );
       
       if (success) {
-        print('Successfully stored encrypted location data');
+        print('Successfully stored location data');
       } else {
-        print('Failed to store encrypted location data');
+        print('Failed to store location data');
       }
       
       return success;
