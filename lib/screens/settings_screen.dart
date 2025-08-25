@@ -23,7 +23,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final ChildAppService _childService = ChildAppService();
   final AuthService _authService = AuthService();
   final TextEditingController _hoursController = TextEditingController();
+  final TextEditingController _customAlertController = TextEditingController();
   int _survivalAlertHours = 12;
+  bool _useCustomAlertHours = false;
   String? _elderlyName;
   bool _isLoadingFamilyInfo = true;
 
@@ -36,10 +38,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     try {
+      // First try to load from Firebase if we have a family code
+      if (widget.familyCode != null) {
+        try {
+          final familyData = await _childService.getFamilyInfo(widget.familyCode!);
+          if (familyData != null && familyData['settings'] != null) {
+            final settings = familyData['settings'] as Map<String, dynamic>;
+            final firebaseHours = settings['alertHours'] as int? ?? 12;
+            
+            // Save to local storage for caching
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setInt('survival_alert_hours', firebaseHours);
+            
+            setState(() {
+              _survivalAlertHours = firebaseHours;
+              _hoursController.text = firebaseHours.toString();
+              
+              // Check if it's a custom value (not one of the presets)
+              final presetHours = [3, 6, 12, 24];
+              _useCustomAlertHours = !presetHours.contains(firebaseHours);
+              if (_useCustomAlertHours) {
+                _customAlertController.text = firebaseHours.toString();
+              }
+            });
+            
+            print('Loaded alert hours from Firebase: $firebaseHours');
+            return;
+          }
+        } catch (e) {
+          print('Error loading from Firebase, falling back to local storage: $e');
+        }
+      }
+      
+      // Fallback to local storage
       final prefs = await SharedPreferences.getInstance();
+      final hours = prefs.getInt('survival_alert_hours') ?? 12;
       setState(() {
-        _survivalAlertHours = prefs.getInt('survival_alert_hours') ?? 12;
-        _hoursController.text = _survivalAlertHours.toString();
+        _survivalAlertHours = hours;
+        _hoursController.text = hours.toString();
+        
+        // Check if it's a custom value (not one of the presets)
+        final presetHours = [3, 6, 12, 24];
+        _useCustomAlertHours = !presetHours.contains(hours);
+        if (_useCustomAlertHours) {
+          _customAlertController.text = hours.toString();
+        }
       });
     } catch (e) {
       print('Error loading settings: $e');
@@ -254,7 +297,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                         child: const Text(
-                          '삭제하고 변경',
+                          '변경',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -374,7 +417,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ),
                           child: const Text(
-                            '네, 삭제합니다',
+                            '확인',
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.bold,
@@ -467,6 +510,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _buildAlertHourOption(int hours) {
+    final isSelected = _survivalAlertHours == hours && !_useCustomAlertHours;
+    
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _survivalAlertHours = hours;
+          _useCustomAlertHours = false;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryBlue : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? AppTheme.primaryBlue : AppTheme.gray300,
+            width: 2,
+          ),
+          boxShadow: isSelected ? AppTheme.getCardShadow(elevation: 3) : [],
+        ),
+        child: Text(
+          '${hours}시간',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: isSelected ? Colors.white : AppTheme.textMedium,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomInputOption() {
+    final isSelected = _useCustomAlertHours;
+    
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _useCustomAlertHours = true;
+          if (_customAlertController.text.isNotEmpty) {
+            final customHours = int.tryParse(_customAlertController.text);
+            if (customHours != null && customHours >= 1 && customHours <= 72) {
+              _survivalAlertHours = customHours;
+            }
+          }
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryBlue : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? AppTheme.primaryBlue : AppTheme.gray300,
+            width: 2,
+          ),
+          boxShadow: isSelected ? AppTheme.getCardShadow(elevation: 3) : [],
+        ),
+        child: Text(
+          '직접 입력',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: isSelected ? Colors.white : AppTheme.textMedium,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -533,110 +647,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppTheme.gray50,
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.gray200, width: 1),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Header Section
                     Row(
                       children: [
-                        Icon(Icons.heart_broken, color: AppColors.warningRed),
-                        const SizedBox(width: 12),
+                        Icon(Icons.schedule, size: 20, color: AppTheme.primaryBlue),
+                        const SizedBox(width: 8),
                         const Text(
-                          '부모님 안전 안심 알림',
+                          '알림 시간 설정',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
+                            color: AppTheme.textDark,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       '몇 시간 동안 활동이 없으면 부모님 안전 안심 알림을 받으시겠습니까?',
-                      style: TextStyle(fontSize: 14, color: Colors.grey),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.textMedium,
+                      ),
                     ),
                     const SizedBox(height: 16),
-                    Row(
+                    
+                    // Options Layout
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _hoursController,
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            decoration: InputDecoration(
-                              labelText: '시간',
-                              hintText: '예: 12',
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(
-                                  color: AppColors.warningRed,
-                                  width: 2,
-                                ),
-                              ),
-                              prefixIcon: Icon(
-                                Icons.access_time,
-                                color: AppColors.warningRed,
-                              ),
-                              suffixText: '시간',
-                            ),
-                            onChanged: (value) {
-                              final hours = int.tryParse(value);
-                              if (hours != null && hours > 0 && hours <= 72) {
-                                setState(() {
-                                  _survivalAlertHours = hours;
-                                });
-                              }
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.warningRed.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '현재: $_survivalAlertHours시간',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.warningRed,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '1-72시간 사이',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
+                        _buildAlertHourOption(3),
+                        _buildAlertHourOption(6),
+                        _buildAlertHourOption(12),
+                        _buildAlertHourOption(24),
+                        _buildCustomInputOption(),
                       ],
                     ),
+                    
+                    // Custom Input Field
+                    if (_useCustomAlertHours) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppTheme.primaryBlue, width: 2),
+                        ),
+                        child: TextField(
+                          controller: _customAlertController,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: '시간 입력 (1-72)',
+                            suffixText: '시간',
+                            suffixStyle: TextStyle(color: AppTheme.primaryBlue),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.all(16),
+                          ),
+                          onChanged: (value) {
+                            final hours = int.tryParse(value);
+                            if (hours != null && hours >= 1 && hours <= 72) {
+                              setState(() {
+                                _survivalAlertHours = hours;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                    
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: AppColors.warningRed.withOpacity(0.1),
+                        color: AppTheme.primaryBlue.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Row(
@@ -644,15 +739,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Icon(
                             Icons.info_outline,
                             size: 14,
-                            color: AppColors.warningRed,
+                            color: AppTheme.primaryBlue,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              '부모님의 앱 사용, 화면 터치 등의 활동이 설정 시간 동안 없으면 알림을 받습니다.',
+                              '현재 설정: $_survivalAlertHours시간 • 부모님의 앱 사용, 화면 터치 등의 활동이 설정 시간 동안 없으면 알림을 받습니다.',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: AppColors.warningRed,
+                                color: AppTheme.primaryBlue,
                                 height: 1.3,
                               ),
                             ),

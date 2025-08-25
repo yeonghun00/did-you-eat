@@ -208,13 +208,16 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryBlue,
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Icon(
-                  Icons.family_restroom,
-                  size: 48,
-                  color: AppTheme.white,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.asset(
+                    'assets/app_icon.png',
+                    width: 80,
+                    height: 80,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               const SizedBox(height: 32),
@@ -380,18 +383,22 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
         final childService = ChildAppService();
         
         try {
-          final familyExists = await childService.checkFamilyExists(familyCode);
+          // Try to get fresh family data instead of just checking existence
+          final freshFamilyData = await childService.getFamilyInfo(familyCode);
           
-          if (familyExists == true) {
-            // Family exists - proceed to home
+          if (freshFamilyData != null && freshFamilyData['approved'] == true) {
+            // Family exists and is approved - proceed to home with fresh data
             final familyInfo = FamilyInfo.fromMap({
               'familyCode': familyCode,
-              'elderlyName': cachedData?['elderlyName'] ?? '',
-              'createdAt': cachedData?['createdAt'],
-              'lastMealTime': cachedData?['lastMealTime'], // Handled in child_app_service.dart parsing
-              'isActive': cachedData?['isActive'] ?? false,
-              'deviceInfo': _extractDeviceInfo(cachedData?['deviceInfo']),
+              'elderlyName': freshFamilyData['elderlyName'] ?? '',
+              'createdAt': freshFamilyData['createdAt'],
+              'lastMealTime': freshFamilyData['lastMealTime'],
+              'isActive': freshFamilyData['isActive'] ?? false,
+              'deviceInfo': _extractDeviceInfo(freshFamilyData['deviceInfo']),
             });
+            
+            // Update cached data with fresh data
+            await sessionManager.startSession(familyCode, freshFamilyData);
             
             if (!mounted) return;
             Navigator.pushReplacement(
@@ -401,18 +408,17 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
               ),
             );
             return;
-          } else if (familyExists == false) {
-            // Only show account deleted if we're absolutely sure (not network error)
-            secureLog.warning('Family definitively does not exist - showing account deleted');
-            await sessionManager.clearSession();
+          } else if (freshFamilyData != null && freshFamilyData['approved'] != true) {
+            // Family exists but not approved - go to family setup
+            secureLog.info('Family exists but not approved, redirecting to setup');
             if (!mounted) return;
             Navigator.pushReplacement(
               context,
-              AppTheme.fadeTransition(page: const AccountDeletedScreen()),
+              AppTheme.slideTransition(page: const FamilySetupScreen()),
             );
             return;
           }
-          // If familyExists == null (network error), continue with normal flow and try cached data
+          // If freshFamilyData == null (network error or deleted), continue with cached data fallback
         } catch (e) {
           // Network or Firebase error - don't assume account is deleted
           secureLog.warning('Error checking family existence, continuing with cached data: $e');
@@ -441,9 +447,12 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
         }
       }
       
-      // Fallback to user profile check
+      // Fallback to user profile check - but be more patient with network issues
       final currentUser = authService.currentUser;
       secureLog.debug('Checking user profile for family codes');
+      
+      // Add small delay to let Firebase fully initialize after sign-in
+      await Future.delayed(const Duration(seconds: 1));
       
       final userProfile = await authService.getUserProfile();
       
@@ -462,13 +471,13 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
             // Start session with this family code
             await sessionManager.startSession(familyCode, null);
             
-            // Validate family code and check if approved
+            // Try to get family data directly instead of just checking existence
             final childService = ChildAppService();
-            final familyExists = await childService.checkFamilyExists(familyCode);
+            final familyData = await childService.getFamilyInfo(familyCode);
 
-            if (familyExists == null) {
-              // Network error - show retry dialog instead of account deletion
-              secureLog.warning('Network error checking family existence - KEEPING code in profile');
+            if (familyData == null) {
+              // Could be network error or deleted family - be more conservative
+              secureLog.warning('Could not load family data - trying retry before assuming deletion');
               if (!mounted) return;
               final shouldRetry = await _showProfileRetryDialog();
               
@@ -476,8 +485,8 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
                 _initializeApp();
                 return;
               } else {
-                // User chose to re-enter family code - but DON'T remove existing code
-                secureLog.info('User chose family setup but preserving existing family code');
+                // User chose to re-enter family code - but DON'T remove existing code from profile yet
+                secureLog.info('User chose family setup - will preserve existing family code as backup');
                 Navigator.pushReplacement(
                   context,
                   AppTheme.slideTransition(page: const FamilySetupScreen()),
@@ -486,20 +495,7 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
               }
             }
 
-            if (familyExists == false) {
-              // Family actually deleted - remove from user profile
-              secureLog.warning('Family was actually deleted by parent app');
-              await authService.removeFamilyCode(familyCode);
-              if (!mounted) return;
-              Navigator.pushReplacement(
-                context,
-                AppTheme.fadeTransition(page: const AccountDeletedScreen()),
-              );
-              return;
-            }
-
-            final familyData = await childService.getFamilyInfo(familyCode);
-            if (familyData != null && familyData['approved'] == true) {
+            if (familyData['approved'] == true) {
               // Valid and approved family code
               secureLog.debug('Raw family data keys: ${familyData.keys.toList()}');
               
@@ -544,18 +540,16 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
               );
               return;
             } else {
-              // Family code exists but not approved or network error - DON'T remove from profile
-              secureLog.warning('Family code exists but not approved or network error - keeping code in profile');
+              // Family code exists but not approved yet - keep trying
+              secureLog.warning('Family exists but not approved yet - family may still be pending approval');
               
-              // Show retry dialog instead of removing family code
+              // For unapproved families, go to family setup but keep the code
               if (!mounted) return;
-              final shouldRetry = await _showProfileRetryDialog();
-              
-              if (shouldRetry) {
-                _initializeApp();
-                return;
-              }
-              // If user chooses not to retry, go to family setup but DON'T remove code
+              Navigator.pushReplacement(
+                context,
+                AppTheme.slideTransition(page: const FamilySetupScreen()),
+              );
+              return;
             }
           } else {
             secureLog.warning('No family codes found in user profile');
@@ -616,7 +610,8 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
           ],
         ),
         content: const Text(
-          '사용자 정보를 불러오는 중 문제가 발생했습니다.\n'
+          '가족 정보를 불러오는 중 문제가 발생했습니다.\n'
+          '이는 일시적인 네트워크 문제일 수 있습니다.\n'
           '네트워크 연결을 확인하고 다시 시도하시겠습니까?',
         ),
         actions: [
@@ -660,14 +655,17 @@ class SplashScreen extends StatelessWidget {
               width: 80,
               height: 80,
               decoration: BoxDecoration(
-                color: AppTheme.primaryBlue,
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: AppTheme.getCardShadow(elevation: 8),
               ),
-              child: const Icon(
-                Icons.family_restroom,
-                size: 48,
-                color: AppTheme.white,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Image.asset(
+                  'assets/app_icon.png',
+                  width: 80,
+                  height: 80,
+                  fit: BoxFit.cover,
+                ),
               ),
             ),
 

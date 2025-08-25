@@ -145,10 +145,9 @@ class ParentLocationService {
   Future<Position?> _getCurrentLocation({bool highAccuracy = false}) async {
     try {
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: LocationSettings(
-          accuracy: highAccuracy ? LocationAccuracy.high : LocationAccuracy.medium,
-          distanceFilter: _distanceFilter.toInt(),
-        ),
+        desiredAccuracy: highAccuracy ? LocationAccuracy.high : LocationAccuracy.medium,
+        forceAndroidLocationManager: false,
+        timeLimit: const Duration(seconds: 30),
       );
       
       print('Got location: ${position.latitude}, ${position.longitude}');
@@ -258,7 +257,7 @@ class LocationTrackingConfig {
   );
   
   /// High accuracy configuration
-  static const LocationTrackingConfig highAccuracy = LocationTrackingConfig(
+  static const LocationTrackingConfig highAccuracyMode = LocationTrackingConfig(
     updateInterval: Duration(minutes: 2),
     highAccuracy: true,
     distanceFilter: 5.0,

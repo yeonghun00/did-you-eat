@@ -307,10 +307,21 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
               SizedBox(height: MediaQuery.of(context).viewInsets.bottom > 0 ? 20 : 60),
               
               // 앱 로고 및 제목
-              Icon(
-                Icons.family_restroom,
-                size: 80,
-                color: AppColors.primaryBlue,
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.asset(
+                    'assets/app_icon.png',
+                    width: 80,
+                    height: 80,
+                    fit: BoxFit.cover,
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
               

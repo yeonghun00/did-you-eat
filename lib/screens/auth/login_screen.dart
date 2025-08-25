@@ -158,14 +158,17 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                     width: 100,
                     height: 100,
                     decoration: BoxDecoration(
-                      color: AppColors.primaryBlue,
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: AppTheme.getCardShadow(elevation: 8),
                     ),
-                    child: const Icon(
-                      Icons.family_restroom,
-                      size: 60,
-                      color: Colors.white,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: Image.asset(
+                        'assets/app_icon.png',
+                        width: 100,
+                        height: 100,
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                   
