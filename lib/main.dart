@@ -12,6 +12,7 @@ import 'services/fcm_message_service.dart';
 import 'services/fcm_token_service.dart';
 import 'services/auth_service.dart';
 import 'services/session_manager.dart';
+import 'services/safety_notification_service.dart';
 import 'models/family_record.dart';
 import 'theme/app_theme.dart';
 import 'utils/app_lifecycle_handler.dart';
@@ -136,6 +137,9 @@ class _FirebaseInitWrapperState extends State<FirebaseInitWrapper> {
       
       // Initialize session manager
       await SessionManager().initialize();
+      
+      // Initialize safety notification service
+      await SafetyNotificationService().initialize();
 
       setState(() {
         _isInitialized = true;
@@ -387,27 +391,42 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
           final freshFamilyData = await childService.getFamilyInfo(familyCode);
           
           if (freshFamilyData != null && freshFamilyData['approved'] == true) {
-            // Family exists and is approved - proceed to home with fresh data
-            final familyInfo = FamilyInfo.fromMap({
-              'familyCode': familyCode,
-              'elderlyName': freshFamilyData['elderlyName'] ?? '',
-              'createdAt': freshFamilyData['createdAt'],
-              'lastMealTime': freshFamilyData['lastMealTime'],
-              'isActive': freshFamilyData['isActive'] ?? false,
-              'deviceInfo': _extractDeviceInfo(freshFamilyData['deviceInfo']),
-            });
+            // Validate user is in memberIds array
+            final currentUser = authService.currentUser;
+            final memberIds = List<String>.from(freshFamilyData['memberIds'] ?? []);
             
-            // Update cached data with fresh data
-            await sessionManager.startSession(familyCode, freshFamilyData);
-            
-            if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              AppTheme.slideTransition(
-                page: HomeScreen(familyCode: familyCode, familyInfo: familyInfo),
-              ),
-            );
-            return;
+            if (currentUser != null && memberIds.contains(currentUser.uid)) {
+              // Family exists, is approved, and user is authorized - proceed to home with fresh data
+              final familyInfo = FamilyInfo.fromMap({
+                'familyCode': familyCode,
+                'elderlyName': freshFamilyData['elderlyName'] ?? '',
+                'createdAt': freshFamilyData['createdAt'],
+                'lastMealTime': freshFamilyData['lastMealTime'],
+                'isActive': freshFamilyData['isActive'] ?? false,
+                'deviceInfo': _extractDeviceInfo(freshFamilyData['deviceInfo']),
+              });
+              
+              // Update cached data with fresh data
+              await sessionManager.startSession(familyCode, freshFamilyData);
+              
+              if (!mounted) return;
+              Navigator.pushReplacement(
+                context,
+                AppTheme.slideTransition(
+                  page: HomeScreen(familyCode: familyCode, familyInfo: familyInfo),
+                ),
+              );
+              return;
+            } else {
+              // User not authorized or removed from family
+              secureLog.warning('User not in family memberIds - access revoked or pending');
+              if (!mounted) return;
+              Navigator.pushReplacement(
+                context,
+                AppTheme.slideTransition(page: const FamilySetupScreen()),
+              );
+              return;
+            }
           } else if (freshFamilyData != null && freshFamilyData['approved'] != true) {
             // Family exists but not approved - go to family setup
             secureLog.info('Family exists but not approved, redirecting to setup');
@@ -496,21 +515,25 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
             }
 
             if (familyData['approved'] == true) {
-              // Valid and approved family code
-              secureLog.debug('Raw family data keys: ${familyData.keys.toList()}');
+              // Validate user is in memberIds array
+              final memberIds = List<String>.from(familyData['memberIds'] ?? []);
               
-              // Update session with family data
-              await sessionManager.startSession(familyCode, familyData);
-              
-              // Only pass the fields that FamilyInfo constructor expects
-              final familyInfo = FamilyInfo.fromMap({
-                'familyCode': familyCode,
-                'elderlyName': familyData['elderlyName'] ?? '',
-                'createdAt': familyData['createdAt'],
-                'lastMealTime': familyData['lastMealTime'], // Handled in child_app_service.dart parsing
-                'isActive': familyData['isActive'] ?? false,
-                'deviceInfo': _extractDeviceInfo(familyData['deviceInfo']),
-              });
+              if (currentUser != null && memberIds.contains(currentUser.uid)) {
+                // Valid, approved family code and user is authorized
+                secureLog.debug('Raw family data keys: ${familyData.keys.toList()}');
+                
+                // Update session with family data
+                await sessionManager.startSession(familyCode, familyData);
+                
+                // Only pass the fields that FamilyInfo constructor expects
+                final familyInfo = FamilyInfo.fromMap({
+                  'familyCode': familyCode,
+                  'elderlyName': familyData['elderlyName'] ?? '',
+                  'createdAt': familyData['createdAt'],
+                  'lastMealTime': familyData['lastMealTime'], // Handled in child_app_service.dart parsing
+                  'isActive': familyData['isActive'] ?? false,
+                  'deviceInfo': _extractDeviceInfo(familyData['deviceInfo']),
+                });
 
               // Register FCM token for existing connections
               final familyId = familyData['familyId'] as String?;
@@ -539,6 +562,16 @@ class _AuthenticatedAppState extends State<AuthenticatedApp> {
                 ),
               );
               return;
+              } else {
+                // User not in memberIds - access revoked
+                secureLog.warning('User not in family memberIds for approved family - access revoked');
+                if (!mounted) return;
+                Navigator.pushReplacement(
+                  context,
+                  AppTheme.slideTransition(page: const FamilySetupScreen()),
+                );
+                return;
+              }
             } else {
               // Family code exists but not approved yet - keep trying
               secureLog.warning('Family exists but not approved yet - family may still be pending approval');

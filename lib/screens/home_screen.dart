@@ -8,7 +8,9 @@ import '../services/firebase_service.dart';
 import '../services/child_app_service.dart';
 import '../widgets/today_meal_section.dart';
 import '../widgets/survival_monitor_widget.dart';
+import '../widgets/safety_status_widget.dart';
 import '../widgets/location_card_widget.dart';
+import '../services/safety_notification_service.dart';
 import '../constants/colors.dart';
 import 'activity_screen.dart';
 import 'settings_screen.dart';
@@ -30,6 +32,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final ChildAppService _childService = ChildAppService();
+  final SafetyNotificationService _safetyService = SafetyNotificationService();
   ParentStatusInfo? _statusInfo;
   List<MealRecord> _todayMeals = [];
   bool _isLoading = true;
@@ -47,6 +50,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _loadInitialData();
     _setupRealtimeListeners();
     _monitorFamilyExistence();
+    _startSafetyMonitoring();
   }
 
   void _initializeAnimations() {
@@ -75,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _fadeController.dispose();
     _slideController.dispose();
     _familyExistenceDebounceTimer?.cancel();
+    _safetyService.stopMonitoring();
     super.dispose();
   }
 
@@ -172,6 +177,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     });
   }
 
+  /// 안전 상태 모니터링 시작
+  void _startSafetyMonitoring() {
+    _safetyService.startMonitoring(widget.familyCode);
+  }
 
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -302,11 +311,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     position: _slideAnimation,
                     child: Column(
                       children: [
-                        // 생존 신호 모니터링
+                        // 안전 상태 모니터링 (새로운 디자인)
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 400),
                           child: SurvivalMonitorWidget(
                             familyCode: widget.familyCode,
+                            showLegacyDesign: true,
                           ),
                         ),
 

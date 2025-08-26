@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../constants/colors.dart';
 import '../models/family_record.dart';
 import '../services/auth_service.dart';
@@ -8,6 +9,7 @@ import '../services/child_app_service.dart';
 import '../services/fcm_token_service.dart';
 import '../theme/app_theme.dart';
 import 'family_setup_screen.dart';
+import 'help_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final String? familyCode;
@@ -483,6 +485,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _openPrivacyPolicy() async {
+    const url = 'https://emfla3.blogspot.com/2025/08/blog-post.html';
+    try {
+      final Uri uri = Uri.parse(url);
+      // Use platformDefault mode to avoid null component warnings
+      await launchUrl(uri, mode: LaunchMode.platformDefault);
+    } catch (e) {
+      print('Error opening privacy policy: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('링크 열기에 실패했습니다.')),
+        );
+      }
+    }
+  }
+
+  void _showHelpGuide() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const HelpScreen(),
+      ),
+    );
+  }
+
 
   Widget _buildDeletedDataItem(IconData icon, String text) {
     return Padding(
@@ -771,16 +797,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildActionItem(
                 icon: Icons.privacy_tip,
                 title: '개인정보 처리방침',
-                onTap: () {
-                  // TODO: 개인정보 처리방침 페이지로 이동
-                },
+                onTap: _openPrivacyPolicy,
               ),
               _buildActionItem(
                 icon: Icons.help,
                 title: '도움말',
-                onTap: () {
-                  // TODO: 도움말 페이지로 이동
-                },
+                onTap: _showHelpGuide,
               ),
             ],
           ),

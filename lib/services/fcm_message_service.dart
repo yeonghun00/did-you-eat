@@ -85,6 +85,9 @@ class FCMMessageService {
       case 'survival_alert':
         _handleSurvivalAlert(message.data);
         break;
+      case 'safety_status_critical':
+        _handleSafetyStatusCritical(message.data);
+        break;
       case 'food_alert':
         _handleFoodAlert(message.data);
         break;
@@ -114,6 +117,19 @@ class FCMMessageService {
     // TODO: Show urgent UI alert, sound alarm, etc.
   }
 
+  /// Handle safety status critical notification
+  static void _handleSafetyStatusCritical(Map<String, dynamic> data) {
+    final elderlyName = data['elderly_name'] ?? '부모님';
+    final hoursInactive = data['hours_inactive'] ?? '12';
+    final alertHours = data['alert_hours'] ?? '12';
+    final safetyLevel = data['safety_level'] ?? 'critical';
+    
+    print('🚨 Safety status critical: $elderlyName - ${hoursInactive}시간 비활성 (설정: ${alertHours}시간)');
+    
+    // TODO: Show critical safety UI, vibrate phone, play alarm sound
+    // TODO: Option to call emergency contacts, acknowledge safety
+  }
+
   /// Handle food alert notification
   static void _handleFoodAlert(Map<String, dynamic> data) {
     final elderlyName = data['elderly_name'] ?? '부모님';
@@ -136,6 +152,9 @@ class FCMMessageService {
         break;
       case 'survival_alert':
         channelId = 'emergency_alerts';
+        break;
+      case 'safety_status_critical':
+        channelId = 'safety_alerts';
         break;
       case 'food_alert':
         channelId = 'meal_alerts';
@@ -194,6 +213,8 @@ class FCMMessageService {
         return '식사 패턴 경고';
       case 'emergency_alerts':
         return '응급 알림';
+      case 'safety_alerts':
+        return '안전 상태 알림';
       default:
         return '알림';
     }
@@ -208,6 +229,8 @@ class FCMMessageService {
         return '식사 패턴 이상 알림';
       case 'emergency_alerts':
         return '생존 신호 응급 알림';
+      case 'safety_alerts':
+        return '부모님 안전 상태 알림';
       default:
         return '일반 알림';
     }
@@ -217,6 +240,7 @@ class FCMMessageService {
   static Importance _getImportance(String? type) {
     switch (type) {
       case 'survival_alert':
+      case 'safety_status_critical':
         return Importance.max;
       case 'food_alert':
         return Importance.high;

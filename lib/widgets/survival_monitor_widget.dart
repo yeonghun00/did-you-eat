@@ -4,13 +4,20 @@ import '../services/child_app_service.dart';
 import '../constants/colors.dart';
 import 'location_map_widget.dart';
 import 'simple_location_widget.dart';
+import 'safety_status_widget.dart';
 
+/// 생존 신호 모니터링 위젯
+/// 
+/// 새로운 SafetyStatusWidget을 래핑하여 하위 호환성을 제공합니다.
+/// 기존 코드의 마이그레이션 없이 새로운 안전 상태 시스템을 사용할 수 있습니다.
 class SurvivalMonitorWidget extends StatefulWidget {
   final String familyCode;
+  final bool showLegacyDesign;
 
   const SurvivalMonitorWidget({
     Key? key,
     required this.familyCode,
+    this.showLegacyDesign = false,
   }) : super(key: key);
 
   @override
@@ -22,6 +29,16 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
 
   @override
   Widget build(BuildContext context) {
+    // 새로운 SafetyStatusWidget 사용 (권장)
+    if (!widget.showLegacyDesign) {
+      return SafetyStatusWidget(familyCode: widget.familyCode);
+    }
+    
+    // 기존 디자인 유지 (하위 호환성)
+    return _buildLegacyDesign();
+  }
+  
+  Widget _buildLegacyDesign() {
     return StreamBuilder<Map<String, dynamic>>(
       stream: _childService.listenToSurvivalStatus(widget.familyCode),
       builder: (context, snapshot) {
@@ -131,7 +148,7 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
             } else {
               timeStr = '${inactiveMinutes}분';
             }
-            status = '✅ 안전하게 지내고 계세요 ($timeStr 전 사용)';
+            status = '✅ 안전하게 지내고 계세요';
             statusColor = AppColors.normalGreen;
             statusIcon = Icons.check_circle;
           }
@@ -230,12 +247,13 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                         ),
                       ),
                       if (lastPhoneActivityTime != null) ...[
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 4),
                         Text(
-                          '마지막 휴대폰 사용: ${_formatDetailedTimestamp(lastPhoneActivityTime!)}',
+                          _getSimpleTimeStatus(lastPhoneActivityTime!),
                           style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.lightText,
+                            fontSize: 14,
+                            color: statusColor.withOpacity(0.8),
+                            fontWeight: FontWeight.w400,
                           ),
                         ),
                       ],
@@ -315,67 +333,6 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
                     ],
                   ),
                 },
-                
-                
-                // Location info (simplified - map moved to separate widget)
-                if (location != null && 
-                    location!['latitude'] != null && 
-                    location!['longitude'] != null) ...{
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.location_on, size: 16, color: Colors.blue),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '현재 위치: ${location!['address'] ?? '위치 공유 준비 중'}${location!['timestamp'] != null ? ' | ${_formatTimestamp(location!['timestamp'] is Timestamp ? (location!['timestamp'] as Timestamp).toDate() : DateTime.parse(location!['timestamp'].toString()))}' : ''}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.blue,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                },
-                
-                
-                // Status explanation
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryBlue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        size: 16,
-                        color: AppColors.primaryBlue,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '가족이 안심할 수 있도록 안전 상태를 공유합니다.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.primaryBlue,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             ),
           ),
@@ -470,24 +427,22 @@ class _SurvivalMonitorWidgetState extends State<SurvivalMonitorWidget> {
     }
   }
 
-  String _formatDetailedTimestamp(DateTime dateTime) {
-    // Format: "July 26, 2025 at 3:22:15 PM UTC+9"
-    const months = [
-      '', 'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
+  String _getSimpleTimeStatus(DateTime lastActivity) {
+    final now = DateTime.now();
+    final difference = now.difference(lastActivity);
     
-    final month = months[dateTime.month];
-    final day = dateTime.day;
-    final year = dateTime.year;
-    
-    final hour = dateTime.hour;
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    final second = dateTime.second.toString().padLeft(2, '0');
-    
-    final period = hour >= 12 ? 'PM' : 'AM';
-    final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-    
-    return '$month $day, $year at $displayHour:$minute:$second $period UTC+9';
+    if (difference.inMinutes < 30) {
+      return '방금 전 활동';
+    } else if (difference.inHours < 1) {
+      return '${difference.inMinutes}분 전 활동';
+    } else if (difference.inHours < 24) {
+      return '${difference.inHours}시간 전 활동';
+    } else if (difference.inDays == 1) {
+      return '어제 활동';
+    } else {
+      return '${difference.inDays}일 전 활동';
+    }
   }
+  
+  // 나머지 기존 헬퍼 메서드들은 그대로 유지
 }

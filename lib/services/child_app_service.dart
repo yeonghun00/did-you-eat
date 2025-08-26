@@ -77,20 +77,30 @@ class ChildAppService {
       } on FirebaseException catch (e) {
         secureLog.error('Firebase error in $operationName (attempt ${attempt + 1}): ${e.code}', e);
         
-        // For approval operations specifically, provide detailed error context
-        if (operationName == 'approveFamilyCode' && e.code == 'permission-denied') {
-          secureLog.error('PERMISSION DENIED during approval operation - user may not be in family memberIds yet', e);
+        // Enhanced error handling for new security model
+        if (e.code == 'permission-denied') {
+          secureLog.error('PERMISSION DENIED - user may not be in family memberIds or security rules blocked access', e);
           
-          // For permission errors during approval, retry once in case of race conditions
-          if (attempt < 1) {
+          // For approval operations, retry once in case of race conditions
+          if (operationName == 'approveFamilyCode' && attempt < 1) {
             secureLog.warning('Retrying approval operation in case of race condition');
             await Future.delayed(Duration(seconds: 2));
             continue;
           }
+          
+          // For other operations, provide more context
+          if (operationName.contains('getFamilyInfo')) {
+            secureLog.error('Family info access denied - user may not be in memberIds array');
+          } else if (operationName.contains('survival') || operationName.contains('recordings')) {
+            secureLog.error('Family data access denied - user may have been removed from family');
+          }
+          
+          // Don't retry permission errors - they indicate security rule violations
+          rethrow;
         }
         
-        // Don't retry permission errors (except approval operations) or invalid data errors
-        if (e.code == 'permission-denied' || e.code == 'invalid-argument') {
+        // Don't retry invalid data errors
+        if (e.code == 'invalid-argument') {
           rethrow;
         }
         if (attempt == maxRetries - 1) rethrow;
@@ -105,59 +115,83 @@ class ChildAppService {
   }
 
   /// Validate and get family information using connection code
+  /// Now uses the new connection_codes collection for secure lookups
   Future<Map<String, dynamic>?> getFamilyInfo(String connectionCode) async {
     return await _executeWithRetry<Map<String, dynamic>?>(
       () async {
-        secureLog.operationStart('Getting family info for connection code');
+        secureLog.operationStart('Getting family info for connection code using new security model');
         
         // Ensure we have proper authentication
         final currentUser = FirebaseAuth.instance.currentUser;
         secureLog.debug('Current user authenticated (anonymous: ${currentUser?.isAnonymous ?? 'unknown'})');
         
-        // Query by connectionCode instead of document ID
-        secureLog.debug('Querying families collection');
-        final query = await _firestore.collection('families')
-            .where('connectionCode', isEqualTo: connectionCode)
+        // First, look up the connection code in the new connection_codes collection
+        secureLog.debug('Querying connection_codes collection');
+        final codeQuery = await _firestore.collection('connection_codes')
+            .where('code', isEqualTo: connectionCode)
+            .where('isActive', isEqualTo: true)
             .limit(1)
             .get();
         
-        secureLog.debug('Query completed. Found ${query.docs.length} documents');
-        
-        if (query.docs.isNotEmpty) {
-          final doc = query.docs.first;
-          final data = doc.data();
-          data['familyId'] = doc.id; // Add document ID for reference
+        if (codeQuery.docs.isEmpty) {
+          secureLog.warning('Connection code not found or inactive in connection_codes collection');
           
-          secureLog.operationSuccess('Family info found with elderly name: ${data['elderlyName']}, approved: ${data['approved']}, active: ${data['isActive']}');
+          // Fallback: check old families collection for backward compatibility
+          secureLog.debug('Checking old families collection for backward compatibility');
+          final oldQuery = await _firestore.collection('families')
+              .where('connectionCode', isEqualTo: connectionCode)
+              .limit(1)
+              .get();
           
-          return data;
-        } else {
-          secureLog.warning('Connection code does not exist in families collection');
-          
-          // Debug: Let's check if there are any families at all
-          try {
-            final allFamilies = await _firestore.collection('families').limit(5).get();
-            secureLog.debug('Debug: Found ${allFamilies.docs.length} families in collection');
-            for (final family in allFamilies.docs) {
-              final familyData = family.data();
-              secureLog.debug('Family found with elderlyName: ${familyData['elderlyName']}');
-            }
-          } catch (e) {
-            secureLog.error('Debug query failed', e);
+          if (oldQuery.docs.isNotEmpty) {
+            final doc = oldQuery.docs.first;
+            final data = doc.data();
+            data['familyId'] = doc.id;
+            secureLog.info('Found family using old structure - backward compatibility');
+            return data;
           }
           
-          return null; // Return null instead of empty map for clarity
+          return null;
         }
+        
+        // Get the family ID from the connection code document
+        final codeDoc = codeQuery.docs.first;
+        final codeData = codeDoc.data();
+        final familyId = codeData['familyId'] as String?;
+        
+        if (familyId == null) {
+          secureLog.error('Connection code document missing familyId');
+          return null;
+        }
+        
+        secureLog.debug('Found familyId: $familyId for connection code');
+        
+        // Now get the actual family document
+        final familyDoc = await _firestore.collection('families').doc(familyId).get();
+        
+        if (!familyDoc.exists) {
+          secureLog.error('Family document does not exist for ID: $familyId');
+          return null;
+        }
+        
+        final familyData = familyDoc.data()!;
+        familyData['familyId'] = familyId;
+        familyData['connectionCode'] = connectionCode; // Ensure connection code is included
+        
+        secureLog.operationSuccess('Family info found with elderly name: ${familyData['elderlyName']}, approved: ${familyData['approved']}, memberIds count: ${(familyData['memberIds'] as List?)?.length ?? 0}');
+        
+        return familyData;
       },
       operationName: 'getFamilyInfo',
     );
   }
 
   /// Approve/reject family code (CRITICAL for elderly app to proceed)
+  /// Now implements secure joining with memberIds validation
   Future<bool> approveFamilyCode(String connectionCode, bool approved) async {
     return await _executeWithRetry<bool>(
       () async {
-        secureLog.security('CRITICAL: Attempting to approve family connection');
+        secureLog.security('CRITICAL: Attempting to approve family connection with new security model');
         
         // Ensure we have authentication
         final currentUser = FirebaseAuth.instance.currentUser;
@@ -167,28 +201,17 @@ class ChildAppService {
           throw Exception('No authenticated user for approval operation');
         }
         
-        // Find the family document by connection code
-        secureLog.debug('Querying for family with connection code');
-        final query = await _firestore.collection('families')
-            .where('connectionCode', isEqualTo: connectionCode)
-            .limit(1)
-            .get();
+        // Get family info using the new lookup method
+        final familyData = await getFamilyInfo(connectionCode);
         
-        if (query.docs.isEmpty) {
-          secureLog.error('ERROR: Connection code does not exist');
+        if (familyData == null) {
+          secureLog.error('ERROR: Connection code does not exist or is invalid');
           throw Exception('Family document not found for connection code: $connectionCode');
         }
         
-        final doc = query.docs.first;
-        final familyId = doc.id;
-        final currentData = doc.data();
+        final familyId = familyData['familyId'] as String;
         
-        secureLog.operationSuccess('Found family document for approval - Elderly: ${currentData['elderlyName']}, Current approval: ${currentData['approved']}');
-        
-        // Verify this is the right document
-        if (currentData['connectionCode'] != connectionCode) {
-          throw Exception('Connection code mismatch: expected $connectionCode, got ${currentData['connectionCode']}');
-        }
+        secureLog.operationSuccess('Found family document for approval - Elderly: ${familyData['elderlyName']}, Current approval: ${familyData['approved']}');
         
         // Use a transaction to atomically add user to memberIds and update approval status
         secureLog.debug('Starting transaction to update approval status and membership');
@@ -202,26 +225,67 @@ class ChildAppService {
             throw Exception('Family document no longer exists during transaction');
           }
           
-          final familyData = snapshot.data()!;
-          final currentMemberIds = List<String>.from(familyData['memberIds'] ?? []);
+          final currentFamilyData = snapshot.data()!;
+          final currentMemberIds = List<String>.from(currentFamilyData['memberIds'] ?? []);
           
           // Prepare update data
           Map<String, dynamic> updateData = {
             'approved': approved,
             'approvedAt': FieldValue.serverTimestamp(),
-            'approvedBy': 'Child App',
-            'childAppUserId': currentUser.uid,
+            'approvedBy': currentUser.uid,
           };
           
-          // If approving, add the current user to memberIds if not already present
-          if (approved && !currentMemberIds.contains(currentUser.uid)) {
-            currentMemberIds.add(currentUser.uid);
-            updateData['memberIds'] = currentMemberIds;
-            secureLog.security('Adding current user to family memberIds');
+          // Add child info to the family document
+          if (approved) {
+            // Add the current user to memberIds if not already present
+            if (!currentMemberIds.contains(currentUser.uid)) {
+              currentMemberIds.add(currentUser.uid);
+              updateData['memberIds'] = currentMemberIds;
+              secureLog.security('Adding current user to family memberIds');
+            }
+            
+            // Add child info to track who joined
+            final childInfo = {
+              currentUser.uid: {
+                'email': currentUser.email,
+                'displayName': currentUser.displayName ?? 'Child User',
+                'joinedAt': FieldValue.serverTimestamp(),
+                'role': 'child',
+              }
+            };
+            
+            updateData['childInfo'] = {
+              ...Map<String, dynamic>.from(currentFamilyData['childInfo'] ?? {}),
+              ...childInfo,
+            };
           }
           
-          // Perform the atomic update
+          // Update the family document
           transaction.update(familyDocRef, updateData);
+          
+          // If approved, also deactivate the connection code to prevent reuse
+          if (approved) {
+            try {
+              final codeQuery = await _firestore.collection('connection_codes')
+                  .where('code', isEqualTo: connectionCode)
+                  .where('familyId', isEqualTo: familyId)
+                  .limit(1)
+                  .get();
+              
+              if (codeQuery.docs.isNotEmpty) {
+                final codeDocRef = _firestore.collection('connection_codes').doc(codeQuery.docs.first.id);
+                transaction.update(codeDocRef, {
+                  'isActive': false,
+                  'usedAt': FieldValue.serverTimestamp(),
+                  'usedBy': currentUser.uid,
+                });
+                secureLog.debug('Connection code deactivated after successful approval');
+              }
+            } catch (e) {
+              secureLog.warning('Failed to deactivate connection code, but continuing: $e');
+              // Don't fail the transaction if code deactivation fails
+            }
+          }
           
           secureLog.debug('Transaction prepared with updates: ${updateData.keys.join(', ')}');
           return true;
@@ -237,13 +301,13 @@ class ChildAppService {
             final newApprovalStatus = updatedData['approved'];
             final newMemberIds = List<String>.from(updatedData['memberIds'] ?? []);
             
-            secureLog.debug('VERIFICATION: approved field is now: $newApprovalStatus, memberIds count: ${newMemberIds?.length ?? 0}');
+            secureLog.debug('VERIFICATION: approved field is now: $newApprovalStatus, memberIds count: ${newMemberIds.length}');
             
             if (newApprovalStatus == approved) {
               if (approved && !newMemberIds.contains(currentUser.uid)) {
                 secureLog.warning('WARNING: User was not added to memberIds as expected');
               } else {
-                secureLog.operationSuccess('CONFIRMATION: Approval update was successful!');
+                secureLog.operationSuccess('CONFIRMATION: Secure approval update was successful!');
               }
               return true;
             } else {
@@ -264,21 +328,19 @@ class ChildAppService {
   }
 
   /// Get all recordings with audio/photo URLs
+  /// Now uses secure family lookup
   Future<List<Map<String, dynamic>>> getAllRecordings(String connectionCode) async {
     try {
-      // First find the family document by connection code
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
+      // Use the new secure getFamilyInfo method
+      final familyData = await getFamilyInfo(connectionCode);
       
-      if (query.docs.isEmpty) {
-        secureLog.error('ERROR: Connection code does not exist');
+      if (familyData == null) {
+        secureLog.error('ERROR: Connection code does not exist or user not authorized');
         return [];
       }
       
-      final familyId = query.docs.first.id;
-      secureLog.debug('Found family ID for connection code');
+      final familyId = familyData['familyId'] as String;
+      secureLog.debug('Found family ID for connection code with security validation');
       
       final collection = await _firestore
           .collection('families')
@@ -317,21 +379,19 @@ class ChildAppService {
   }
 
   /// Real-time stream of new recordings
+  /// Now uses secure family lookup
   Stream<List<Map<String, dynamic>>> listenToNewRecordings(String connectionCode) async* {
-    // First find the family document by connection code
-    final query = await _firestore.collection('families')
-        .where('connectionCode', isEqualTo: connectionCode)
-        .limit(1)
-        .get();
+    // Use the new secure getFamilyInfo method
+    final familyData = await getFamilyInfo(connectionCode);
     
-    if (query.docs.isEmpty) {
-      secureLog.error('ERROR: Connection code does not exist');
+    if (familyData == null) {
+      secureLog.error('ERROR: Connection code does not exist or user not authorized');
       yield [];
       return;
     }
     
-    final familyId = query.docs.first.id;
-    secureLog.debug('Found family ID for connection code');
+    final familyId = familyData['familyId'] as String;
+    secureLog.debug('Found family ID for connection code with security validation');
     
     await for (final snapshot in _firestore
         .collection('families')
@@ -364,20 +424,18 @@ class ChildAppService {
   }
 
   /// Get survival status (ACTIVITY DETECTION)
+  /// Now uses secure family lookup
   Future<Map<String, dynamic>?> getSurvivalStatus(String connectionCode) async {
     try {
-      // First find the family document by connection code
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
+      // Use the new secure getFamilyInfo method
+      final familyData = await getFamilyInfo(connectionCode);
       
-      if (query.docs.isEmpty) {
-        secureLog.error('ERROR: Connection code does not exist');
+      if (familyData == null) {
+        secureLog.error('ERROR: Connection code does not exist or user not authorized');
         return null;
       }
       
-      final familyId = query.docs.first.id;
+      final familyId = familyData['familyId'] as String;
       final doc = await _firestore.collection('families').doc(familyId).get();
 
       if (doc.exists) {
@@ -423,22 +481,20 @@ class ChildAppService {
   }
 
   /// Real-time survival monitoring stream
+  /// Now uses secure family lookup
   Stream<Map<String, dynamic>> listenToSurvivalStatus(String connectionCode) async* {
     try {
-      // First find the family document by connection code
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
+      // Use the new secure getFamilyInfo method
+      final familyData = await getFamilyInfo(connectionCode);
       
-      if (query.docs.isEmpty) {
-        secureLog.error('ERROR: Connection code does not exist');
+      if (familyData == null) {
+        secureLog.error('ERROR: Connection code does not exist or user not authorized');
         yield {};
         return;
       }
       
-      final familyId = query.docs.first.id;
-      secureLog.debug('Found family ID for connection code');
+      final familyId = familyData['familyId'] as String;
+      secureLog.debug('Found family ID for connection code with security validation');
       
       await for (final snapshot in _firestore
           .collection('families')
@@ -493,25 +549,24 @@ class ChildAppService {
   }
 
   /// Clear survival alert after family acknowledges
+  /// Now uses secure family lookup
   Future<bool> clearSurvivalAlert(String connectionCode) async {
     try {
-      // First find the family document by connection code
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
+      // Use the new secure getFamilyInfo method
+      final familyData = await getFamilyInfo(connectionCode);
       
-      if (query.docs.isEmpty) {
-        secureLog.error('ERROR: Connection code does not exist');
+      if (familyData == null) {
+        secureLog.error('ERROR: Connection code does not exist or user not authorized');
         return false;
       }
       
-      final familyId = query.docs.first.id;
+      final familyId = familyData['familyId'] as String;
+      final currentUser = FirebaseAuth.instance.currentUser;
       
       await _firestore.collection('families').doc(familyId).update({
         'alerts.survival': null, // Clear survival alert (optimized structure)
         'alertsCleared.survival': FieldValue.serverTimestamp(),
-        'alertsClearedBy.survival': 'Child App',
+        'alertsClearedBy.survival': currentUser?.uid ?? 'Child App',
       });
       return true;
     } catch (e) {
@@ -522,20 +577,18 @@ class ChildAppService {
 
 
   /// Update app settings
+  /// Now uses secure family lookup
   Future<bool> updateSettings(String connectionCode, Map<String, dynamic> settings) async {
     try {
-      // First find the family document by connection code
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
+      // Use the new secure getFamilyInfo method
+      final familyData = await getFamilyInfo(connectionCode);
       
-      if (query.docs.isEmpty) {
-        secureLog.error('ERROR: Connection code does not exist');
+      if (familyData == null) {
+        secureLog.error('ERROR: Connection code does not exist or user not authorized');
         return false;
       }
       
-      final familyId = query.docs.first.id;
+      final familyId = familyData['familyId'] as String;
       
       Map<String, dynamic> updateData = {};
       settings.forEach((key, value) {
@@ -551,22 +604,20 @@ class ChildAppService {
   }
 
   /// Get statistics for family dashboard
+  /// Now uses secure family lookup
   Future<Map<String, dynamic>> getStatistics(String connectionCode) async {
     try {
       await _ensureAuthenticated();
       
-      // First find the family document by connection code
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
+      // Use the new secure getFamilyInfo method
+      final familyData = await getFamilyInfo(connectionCode);
       
-      if (query.docs.isEmpty) {
-        secureLog.error('ERROR: Connection code does not exist');
+      if (familyData == null) {
+        secureLog.error('ERROR: Connection code does not exist or user not authorized');
         return {};
       }
       
-      final familyId = query.docs.first.id;
+      final familyId = familyData['familyId'] as String;
       
       final collection = await _firestore
           .collection('families')
@@ -599,32 +650,41 @@ class ChildAppService {
 
   /// Check if family document still exists (for account deletion detection)
   /// Returns null if network error, true/false if successful check
+  /// Now uses secure family lookup with memberIds validation
   Future<bool?> checkFamilyExists(String connectionCode) async {
-    secureLog.debug('Checking if family exists for connection code');
+    secureLog.debug('Checking if family exists for connection code with security validation');
     
     try {
       final result = await _executeWithRetry<bool>(
         () async {
-          final query = await _firestore.collection('families')
-              .where('connectionCode', isEqualTo: connectionCode)
-              .limit(1)
-              .get();
+          // Use the new secure getFamilyInfo method
+          final familyData = await getFamilyInfo(connectionCode);
           
-          final exists = query.docs.isNotEmpty;
-          if (exists) {
-            secureLog.info('Family found for connection code');
-            // Additional validation: check if document has basic required fields
-            final doc = query.docs.first;
-            final data = doc.data();
-            final hasRequiredFields = data.containsKey('elderlyName') || data.containsKey('createdAt');
+          if (familyData != null) {
+            secureLog.info('Family found and user authorized for connection code');
+            
+            // Additional validation: check if user is still in memberIds
+            final currentUser = FirebaseAuth.instance.currentUser;
+            if (currentUser != null) {
+              final memberIds = List<String>.from(familyData['memberIds'] ?? []);
+              if (!memberIds.contains(currentUser.uid)) {
+                secureLog.warning('User no longer in family memberIds - access revoked');
+                return false; // User was removed from family
+              }
+            }
+            
+            // Check if document has basic required fields
+            final hasRequiredFields = familyData.containsKey('elderlyName') || familyData.containsKey('createdAt');
             if (!hasRequiredFields) {
               secureLog.warning('Family document exists but missing required fields');
               return false; // Treat as deleted if document is corrupted
             }
+            
+            return true;
           } else {
-            secureLog.warning('No family found for connection code - may be deleted');
+            secureLog.warning('No family found or user not authorized for connection code');
+            return false;
           }
-          return exists;
         },
         operationName: 'checkFamilyExists',
       );
@@ -641,22 +701,20 @@ class ChildAppService {
   }
 
   /// Stream to monitor family document existence
+  /// Now uses secure family lookup with memberIds validation
   Stream<bool> listenToFamilyExistence(String connectionCode) async* {
     try {
-      // First find the family document by connection code
-      final query = await _firestore.collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
+      // Use the new secure getFamilyInfo method to get family ID
+      final familyData = await getFamilyInfo(connectionCode);
       
-      if (query.docs.isEmpty) {
-        secureLog.warning('Family document not found for connection code');
+      if (familyData == null) {
+        secureLog.warning('Family document not found or user not authorized for connection code');
         yield false;
         return;
       }
       
-      final familyId = query.docs.first.id;
-      secureLog.debug('Monitoring family document existence');
+      final familyId = familyData['familyId'] as String;
+      secureLog.debug('Monitoring family document existence with security validation');
       
       // Start with true - assume family exists until proven otherwise
       bool lastKnownState = true;
@@ -675,7 +733,19 @@ class ChildAppService {
           continue;
         }
         
-        final currentExists = snapshot.exists;
+        bool currentExists = snapshot.exists;
+        
+        // Additional check: if document exists, verify user is still in memberIds
+        if (currentExists && snapshot.data() != null) {
+          final currentUser = FirebaseAuth.instance.currentUser;
+          if (currentUser != null) {
+            final memberIds = List<String>.from(snapshot.data()!['memberIds'] ?? []);
+            if (!memberIds.contains(currentUser.uid)) {
+              secureLog.warning('User no longer in family memberIds - treating as non-existent');
+              currentExists = false; // User was removed from family
+            }
+          }
+        }
         
         // Only yield changes if the existence state actually changed
         if (currentExists != lastKnownState) {
@@ -684,9 +754,9 @@ class ChildAppService {
           yield currentExists;
           
           if (!currentExists) {
-            secureLog.warning('Family document actually deleted');
+            secureLog.warning('Family document deleted or user access revoked');
           } else {
-            secureLog.info('Family document restored/created');
+            secureLog.info('Family document restored/created or user access granted');
           }
         } else {
           secureLog.debug('No change in family existence state: $currentExists');

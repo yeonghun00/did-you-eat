@@ -7,9 +7,9 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
     
-    // Families collection - enhanced security with user-based access control
+    // Families collection - enhanced security with backward compatibility
     match /families/{familyId} {
-      // Helper function to check if user has access to this family
+      // Helper function to check if user has access to this family (for registered users)
       function hasAccessToFamily() {
         return request.auth != null && 
                exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
@@ -17,27 +17,124 @@ service cloud.firestore {
                resource.data.connectionCode in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyCodes;
       }
       
-      // Helper function to check if this is an approval operation
+      // Helper function to check if user is in memberIds (for existing members)
+      // Handles both new and legacy family documents
+      function isInMemberIds() {
+        return request.auth != null && 
+               (
+                 // New families with memberIds field
+                 ('memberIds' in resource.data && request.auth.uid in resource.data.memberIds) ||
+                 // Legacy families without memberIds - allow access for migration
+                 (!('memberIds' in resource.data) || resource.data.memberIds == null)
+               );
+      }
+      
+      // Helper function to check if this is a legacy family (missing memberIds)
+      // Handles multiple scenarios: field missing, null, undefined, or empty list
+      function isLegacyFamily() {
+        return !('memberIds' in resource.data) || 
+               resource.data.memberIds == null || 
+               resource.data.get('memberIds', null) == null ||
+               (resource.data.memberIds is list && resource.data.memberIds.size() == 0);
+      }
+      
+      // Helper function for child app connection code lookup
+      // Allows reading any family for connection code validation and legacy family access
+      function isConnectionCodeLookup() {
+        return request.auth != null;
+      }
+      
+      // Helper function to check if this is a legacy family access during connection process
+      // Allows authenticated users to access legacy families for migration
+      function isLegacyFamilyAccess() {
+        return request.auth != null && isLegacyFamily();
+      }
+      
+      // Helper function to check if this is a child app joining operation
+      // Handles both new families and legacy family migration
+      function isChildAppJoining() {
+        return request.auth != null &&
+               (
+                 // New families: User is being added to memberIds (not already present)
+                 ('memberIds' in resource.data && 
+                  resource.data.memberIds is list &&
+                  resource.data.memberIds.size() > 0 &&
+                  request.auth.uid in request.resource.data.get('memberIds', []) &&
+                  !(request.auth.uid in resource.data.get('memberIds', []))) ||
+                 
+                 // Legacy families: Adding memberIds field for the first time during migration
+                 (isLegacyFamily() && 
+                  'memberIds' in request.resource.data &&
+                  request.resource.data.memberIds is list &&
+                  request.auth.uid in request.resource.data.get('memberIds', []))
+               ) &&
+               // Only allow approval-related fields to be updated during joining
+               request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['approved', 'approvedAt', 'approvedBy', 'memberIds', 'childInfo']);
+      }
+      
+      // Helper function to check if this is a standard approval operation
+      // Handles both new and legacy families
       function isApprovalOperation() {
         return request.auth != null &&
                request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['approved', 'approvedAt', 'approvedBy', 'childAppUserId', 'memberIds']);
+               .hasOnly(['approved', 'approvedAt', 'approvedBy', 'childAppUserId', 'memberIds', 'childInfo']);
       }
       
-      // Read access: authenticated users can read families by connectionCode for initial connection
-      allow read: if request.auth != null;
+      // Helper function for legacy family migration
+      // Allows authenticated users to migrate legacy families by adding memberIds
+      function isLegacyMigration() {
+        return request.auth != null &&
+               isLegacyFamily() &&
+               // Allow adding memberIds field during migration
+               'memberIds' in request.resource.data &&
+               request.resource.data.memberIds is list &&
+               request.resource.data.memberIds.size() > 0 &&
+               // Ensure only migration-related fields are being updated
+               request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['approved', 'approvedAt', 'approvedBy', 'memberIds', 'childInfo']);
+      }
       
-      // Write access: more restrictive - only for specific operations
-      allow update: if (hasAccessToFamily() && 
-                       // Only allow updating these fields from child app
-                       request.resource.data.diff(resource.data).affectedKeys()
-                       .hasOnly(['survivalAlert', 'settings', 'lastChildAppActivity'])) ||
-                       // OR allow approval operations by any authenticated user
-                       isApprovalOperation();
+      // Helper function specifically for legacy family initial access
+      // Allows any authenticated user to read legacy families for connection purposes
+      function canAccessLegacyFamily() {
+        return request.auth != null && isLegacyFamily();
+      }
       
-      // Create/Delete: only authenticated users (for family creation from parent app)
+      // Read access: Allow authenticated users to read families
+      // This is essential for connection code lookup, validation, and legacy family access
+      allow read: if isConnectionCodeLookup() || canAccessLegacyFamily();
+      
+      // Write access: multiple scenarios with backward compatibility
+      allow update: if (
+        // Scenario 1: Registered users with proper family access
+        (hasAccessToFamily() && 
+         request.resource.data.diff(resource.data).affectedKeys()
+         .hasOnly(['survivalAlert', 'settings', 'lastChildAppActivity'])) ||
+        
+        // Scenario 2: Existing family members (handles legacy families)
+        (isInMemberIds() && 
+         request.resource.data.diff(resource.data).affectedKeys()
+         .hasOnly(['survivalAlert', 'settings', 'lastChildAppActivity', 'alerts', 'alertsCleared', 'alertsClearedBy'])) ||
+        
+        // Scenario 3: Child app joining process (handles both new and legacy)
+        isChildAppJoining() ||
+        
+        // Scenario 4: General approval operations
+        isApprovalOperation() ||
+        
+        // Scenario 5: Legacy family migration during first child connection
+        isLegacyMigration() ||
+        
+        // Scenario 6: Direct legacy family access for immediate migration
+        (canAccessLegacyFamily() && 
+         request.resource.data.diff(resource.data).affectedKeys()
+         .hasOnly(['approved', 'approvedAt', 'approvedBy', 'memberIds', 'childInfo']))
+      );
+      
+      // Create/Delete: only authenticated users
       allow create: if request.auth != null;
-      allow delete: if request.auth != null && hasAccessToFamily();
+      allow delete: if request.auth != null && (hasAccessToFamily() || isInMemberIds());
       
       // Recordings subcollection - read-only for child app users
       match /recordings/{document=**} {
@@ -55,6 +152,19 @@ service cloud.firestore {
       match /child_devices/{deviceId} {
         allow read, write: if request.auth != null;
       }
+    }
+    
+    // Connection codes collection - for secure family joining
+    match /connection_codes/{codeId} {
+      // Allow authenticated users to read connection codes for family lookup
+      allow read: if request.auth != null;
+      
+      // Only allow creating/updating connection codes by authenticated users
+      // (typically parent app creating codes)
+      allow create, update: if request.auth != null;
+      
+      // Allow deletion by authenticated users (cleanup)
+      allow delete: if request.auth != null;
     }
     
     // FCM tokens collection for notifications

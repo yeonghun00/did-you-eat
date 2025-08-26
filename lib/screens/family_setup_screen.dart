@@ -103,8 +103,20 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
       }
     } catch (e) {
       print('❌ ERROR: Family code validation failed: $e');
+      
+      // Enhanced error handling for new security model
+      String errorMessage = '연결에 실패했습니다. 다시 시도해주세요';
+      
+      if (e.toString().contains('permission-denied')) {
+        errorMessage = '가족 코드에 접근할 권한이 없습니다.\n보안 설정을 확인해주세요.';
+      } else if (e.toString().contains('not found') || e.toString().contains('does not exist')) {
+        errorMessage = '가족 코드 $code를 찾을 수 없습니다.\n부모님이 앱에서 가족 코드를 생성했는지 확인해주세요.';
+      } else if (e.toString().contains('network') || e.toString().contains('timeout')) {
+        errorMessage = '네트워크 연결을 확인하고 다시 시도해주세요.';
+      }
+      
       setState(() {
-        _errorMessage = '연결에 실패했습니다. 다시 시도해주세요';
+        _errorMessage = errorMessage;
       });
     } finally {
       setState(() {
@@ -187,13 +199,22 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
               } catch (e) {
                 print('❌ ERROR: Exception during rejection: $e');
                 
+                // Enhanced error handling for rejection failures
+                String errorMessage = '연결 취소에 실패했습니다';
+                
+                if (e.toString().contains('permission-denied')) {
+                  errorMessage = '보안 규칙으로 인해 취소 요청이 차단되었습니다.';
+                } else if (e.toString().contains('network') || e.toString().contains('timeout')) {
+                  errorMessage = '네트워크 연결 문제가 발생했습니다.';
+                }
+                
                 setState(() {
                   _isApproving = false;
                 });
                 
                 Navigator.pop(context);
                 setState(() {
-                  _errorMessage = '연결 취소에 실패했습니다';
+                  _errorMessage = errorMessage;
                 });
               }
             },
@@ -264,13 +285,24 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
               } catch (e) {
                 print('❌ ERROR: Exception during approval: $e');
                 
+                // Enhanced error handling for approval failures
+                String errorMessage = '연결 승인에 실패했습니다. 다시 시도해주세요';
+                
+                if (e.toString().contains('permission-denied')) {
+                  errorMessage = '보안 규칙으로 인해 연결이 차단되었습니다.\n부모님께서 새로운 가족 코드를 생성해주세요.';
+                } else if (e.toString().contains('Transaction failed') || e.toString().contains('already exists')) {
+                  errorMessage = '이미 처리된 요청입니다.\n페이지를 새로고침하고 다시 시도해주세요.';
+                } else if (e.toString().contains('network') || e.toString().contains('timeout')) {
+                  errorMessage = '네트워크 연결 문제가 발생했습니다.\n인터넷 연결을 확인하고 다시 시도해주세요.';
+                }
+                
                 setState(() {
                   _isApproving = false;
                 });
                 
                 Navigator.pop(context);
                 setState(() {
-                  _errorMessage = '연결 승인에 실패했습니다. 다시 시도해주세요\n오류: ${e.toString()}';
+                  _errorMessage = errorMessage;
                 });
               }
             },
