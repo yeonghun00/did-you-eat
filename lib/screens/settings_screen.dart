@@ -7,9 +7,11 @@ import '../models/family_record.dart';
 import '../services/auth_service.dart';
 import '../services/child_app_service.dart';
 import '../services/fcm_token_service.dart';
+import '../services/subscription_manager.dart';
 import '../theme/app_theme.dart';
 import 'family_setup_screen.dart';
 import 'help_screen.dart';
+import 'subscription_settings_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final String? familyCode;
@@ -24,6 +26,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final ChildAppService _childService = ChildAppService();
   final AuthService _authService = AuthService();
+  final SubscriptionManager _subscriptionManager = SubscriptionManager();
   final TextEditingController _hoursController = TextEditingController();
   final TextEditingController _customAlertController = TextEditingController();
   int _survivalAlertHours = 12;
@@ -509,6 +512,108 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  void _showSubscriptionSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const SubscriptionSettingsScreen(),
+      ),
+    );
+  }
+
+
+  Widget _buildSubscriptionStatusCard() {
+    return StreamBuilder(
+      stream: _subscriptionManager.subscriptionStream,
+      initialData: _subscriptionManager.currentSubscription,
+      builder: (context, snapshot) {
+        final canUsePremium = _subscriptionManager.canUsePremiumFeatures;
+        final statusText = _subscriptionManager.getSubscriptionStatusText();
+        
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: canUsePremium 
+                ? LinearGradient(
+                    colors: [
+                      AppTheme.successGreen.withOpacity(0.1),
+                      AppTheme.successGreen.withOpacity(0.05),
+                    ],
+                  )
+                : LinearGradient(
+                    colors: [
+                      AppTheme.warningAmber.withOpacity(0.1),
+                      AppTheme.warningAmber.withOpacity(0.05),
+                    ],
+                  ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: canUsePremium 
+                  ? AppTheme.successGreen.withOpacity(0.3)
+                  : AppTheme.warningAmber.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: (canUsePremium ? AppTheme.successGreen : AppTheme.warningAmber)
+                      .withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  canUsePremium ? Icons.check_circle : Icons.info,
+                  color: canUsePremium ? AppTheme.successGreen : AppTheme.warningAmber,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      canUsePremium ? '프리미엄 활성화됨' : '구독 필요',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      statusText,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.textMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!canUsePremium)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.warningAmber,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    '체험하기',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   Widget _buildDeletedDataItem(IconData icon, String text) {
     return Padding(
@@ -665,6 +770,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 16),
 
+          // 구독 관리 섹션
+          _buildSection(
+            title: '구독 관리',
+            children: [
+              _buildSubscriptionStatusCard(),
+              const SizedBox(height: 8),
+              _buildActionItem(
+                icon: Icons.workspace_premium,
+                title: '구독 설정',
+                onTap: _showSubscriptionSettings,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
 
           // 생존 신호 알림 설정
           _buildSection(

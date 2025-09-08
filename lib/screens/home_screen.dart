@@ -6,6 +6,8 @@ import 'package:love_everyday/theme/app_theme.dart';
 import '../models/family_record.dart';
 import '../services/firebase_service.dart';
 import '../services/child_app_service.dart';
+import '../services/subscription_manager.dart';
+import '../models/subscription_model.dart';
 import '../widgets/today_meal_section.dart';
 import '../widgets/safety_status_widget.dart';
 import '../widgets/location_card_widget.dart';
@@ -32,8 +34,10 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final ChildAppService _childService = ChildAppService();
   final SafetyNotificationService _safetyService = SafetyNotificationService();
+  final SubscriptionManager _subscriptionManager = SubscriptionManager();
   ParentStatusInfo? _statusInfo;
   List<MealRecord> _todayMeals = [];
+  SubscriptionInfo? _subscriptionInfo;
   bool _isLoading = true;
   Timer? _familyExistenceDebounceTimer;
 
@@ -50,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _setupRealtimeListeners();
     _monitorFamilyExistence();
     _startSafetyMonitoring();
+    _initializeSubscription();
   }
 
   void _initializeAnimations() {
@@ -79,6 +84,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _slideController.dispose();
     _familyExistenceDebounceTimer?.cancel();
     _safetyService.stopMonitoring();
+    _subscriptionManager.dispose();
     super.dispose();
   }
 
@@ -181,6 +187,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _safetyService.startMonitoring(widget.familyCode);
   }
 
+  /// 구독 관리자 초기화 및 앱 시작 시 팝업 처리
+  Future<void> _initializeSubscription() async {
+    try {
+      print('🔔 구독 매니저 초기화 시작');
+      
+      // 구독 매니저 초기화 (팝업 없이)
+      await _subscriptionManager.initialize();
+      
+      // 구독 상태 실시간 리스너 설정
+      _subscriptionManager.subscriptionStream.listen((subscriptionInfo) {
+        if (mounted) {
+          setState(() {
+            _subscriptionInfo = subscriptionInfo;
+          });
+          print('🔄 구독 상태 업데이트: ${subscriptionInfo.status}');
+        }
+      });
+      
+      print('✅ 구독 매니저 초기화 완료');
+    } catch (e) {
+      print('❌ 구독 초기화 실패: $e');
+    }
+  }
+
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
@@ -190,6 +220,145 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _showSuccessSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.green),
+    );
+  }
+
+  /// 프리미엄 상태 정보 다이얼로그 표시
+  void _showPremiumStatusDialog() {
+    if (_subscriptionInfo == null) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.workspace_premium,
+                  color: Colors.amber,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  '구독 상태',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.amber.withOpacity(0.1),
+                      Colors.amber.withOpacity(0.05),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '현재 상태: ${_subscriptionInfo!.statusDescription}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primaryBlue,
+                      ),
+                    ),
+                    if (_subscriptionInfo!.isInFreeTrial) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '무료 체험 ${_subscriptionManager.getDaysUntilExpiry()}일 남음',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: AppTheme.textMedium,
+                        ),
+                      ),
+                    ],
+                    if (_subscriptionInfo!.status == SubscriptionStatus.active) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        '월 1,500원 • 자동 갱신 중',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: AppTheme.textMedium,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '프리미엄 기능',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '• 실시간 위치 추적\n'
+                '• 안전 상태 알림\n'
+                '• 식사 패턴 분석\n'
+                '• 건강 리포트',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.textMedium,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('확인'),
+            ),
+            if (!_subscriptionInfo!.canUsePremiumFeatures)
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => SettingsScreen(
+                      familyCode: widget.familyCode,
+                      familyInfo: widget.familyInfo,
+                    )),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primaryBlue,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('구독 관리'),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -346,7 +515,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         type: BottomNavigationBarType.fixed,
         currentIndex: 0,
         selectedItemColor: AppColors.primaryBlue,
-        unselectedItemColor: AppColors.lightText,
+        unselectedItemColor: AppTheme.textLight,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: '홈'),
           BottomNavigationBarItem(icon: Icon(Icons.timeline), label: '활동기록'),

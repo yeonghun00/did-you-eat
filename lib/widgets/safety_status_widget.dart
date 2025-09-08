@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import '../services/child_app_service.dart';
 import '../services/safety_status_calculator.dart';
+import '../services/subscription_manager.dart';
 import '../constants/colors.dart';
 import '../theme/app_theme.dart';
 
@@ -25,6 +26,7 @@ class SafetyStatusWidget extends StatefulWidget {
 class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
   final ChildAppService _childService = ChildAppService();
   final SafetyStatusCalculator _statusCalculator = SafetyStatusCalculator();
+  final SubscriptionManager _subscriptionManager = SubscriptionManager();
 
   Timer? _statusUpdateTimer;
   StreamSubscription? _survivalStatusSubscription;
@@ -141,6 +143,19 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
 
     if (_currentStatus == null) {
       return _buildNoDataWidget();
+    }
+
+    // 프리미엄 접근 제어 체크 - 즉시 팝업 표시
+    if (!_subscriptionManager.canUsePremiumFeatures) {
+      // 위젯이 로드된 후 즉시 팝업 표시
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showMandatorySubscriptionPopup(context);
+        }
+      });
+      
+      // 로딩 상태를 유지하여 사용자가 실제 콘텐츠를 보지 못하게 함
+      return _buildLoadingWidget();
     }
 
     return _buildSafetyStatusCard();
@@ -543,7 +558,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('안전 상태를 확인했습니다.'),
-            backgroundColor: AppColors.normalGreen,
+            backgroundColor: AppTheme.successGreen,
           ),
         );
       }
@@ -641,4 +656,449 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       return hours > 0 ? '$days일 $hours시간' : '$days일';
     }
   }
+
+  /// 필수 구독 팝업 표시
+  void _showMandatorySubscriptionPopup(BuildContext context) {
+    if (!mounted) return;
+    
+    // 이미 팝업이 표시 중인지 확인
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      return;
+    }
+    
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false, // 바깥쪽 터치로 닫기 방지
+      barrierColor: Colors.black87, // 더 진한 배경으로 강조
+      builder: (BuildContext dialogContext) => WillPopScope(
+        onWillPop: () async => false, // 뒤로가기 버튼으로 닫기 방지
+        child: Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(20),
+          child: Container(
+            constraints: BoxConstraints(
+              maxWidth: 400,
+              maxHeight: MediaQuery.of(context).size.height * 0.8,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 30,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 헤더
+                _buildMandatoryPopupHeader(),
+                
+                // 컨텐츠 - 스크롤 가능
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 필수 안내 메시지
+                          _buildMandatoryMessage(),
+                          
+                          const SizedBox(height: 20),
+                          
+                          // 프리미엄 기능 소개
+                          _buildMandatoryFeaturesList(),
+                          
+                          const SizedBox(height: 20),
+                          
+                          // 가격 정보
+                          _buildMandatoryPricingInfo(),
+                          
+                          const SizedBox(height: 24),
+                          
+                          // 액션 버튼들
+                          _buildMandatoryActionButtons(dialogContext),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildMandatoryPopupHeader() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.errorRed,
+            AppTheme.errorRed.withOpacity(0.8),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.security,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            '안전 모니터링 활성화 필요',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '부모님의 안전을 지키기 위해 프리미엄 기능이 필요합니다',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.white,
+              fontWeight: FontWeight.w400,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildMandatoryMessage() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.errorRed.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppTheme.errorRed.withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppTheme.errorRed.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.priority_high,
+              color: AppTheme.errorRed,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '필수 기능 활성화',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textDark,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  '실시간 안전 모니터링은 부모님의 생명과 직결된 중요한 기능입니다. 계속 사용하려면 구독이 필요합니다.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textMedium,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildMandatoryFeaturesList() {
+    const features = [
+      {'icon': Icons.emergency, 'title': '위험 상황 즉시 알림', 'desc': '부모님에게 응급상황 발생 시 실시간 알림'},
+      {'icon': Icons.shield, 'title': '24시간 안전 모니터링', 'desc': '부모님의 활동 상태를 지속적으로 확인'},
+      {'icon': Icons.phone, 'title': '긴급 연락 기능', 'desc': '위험 감지 시 가족에게 자동 연락'},
+      {'icon': Icons.analytics, 'title': '상세 활동 분석', 'desc': '일상 패턴 분석으로 이상 징후 조기 발견'},
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '포함된 안전 기능',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.textDark,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...features.map((feature) => Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryBlue.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  feature['icon'] as IconData,
+                  color: AppTheme.primaryBlue,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      feature['title'] as String,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textDark,
+                      ),
+                    ),
+                    Text(
+                      feature['desc'] as String,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppTheme.textMedium,
+                        height: 1.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        )),
+      ],
+    );
+  }
+  
+  Widget _buildMandatoryPricingInfo() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.warningAmber.withOpacity(0.1),
+            AppTheme.warningAmber.withOpacity(0.05),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppTheme.warningAmber.withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppTheme.warningAmber.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.stars,
+                  color: AppTheme.warningAmber,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                '7일 무료 체험',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              const Text(
+                '체험 후 월',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: AppTheme.textMedium,
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Text(
+                '1,500',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.primaryBlue,
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Text(
+                '원',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: AppTheme.textMedium,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '하루 단 50원 • 부모님 안전은 소중합니다',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppTheme.textMedium,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildMandatoryActionButtons(BuildContext dialogContext) {
+    return Column(
+      children: [
+        // 무료 체험 시작 버튼
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: ElevatedButton(
+            onPressed: () async {
+              try {
+                final success = await _subscriptionManager.startFreeTrial();
+                if (success && mounted) {
+                  Navigator.of(dialogContext).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('무료 체험이 시작되었습니다! 이제 모든 기능을 사용할 수 있습니다.'),
+                      backgroundColor: AppTheme.successGreen,
+                      duration: Duration(seconds: 4),
+                    ),
+                  );
+                  // 위젯을 다시 빌드하여 프리미엄 콘텐츠를 표시
+                  setState(() {});
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('무료 체험 시작에 실패했습니다. 다시 시도해주세요.'),
+                      backgroundColor: AppTheme.errorRed,
+                    ),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryBlue,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: 2,
+            ),
+            child: const Text(
+              '7일 무료 체험 시작하기',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 12),
+        
+        // 구독 설정 바로가기 버튼
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: OutlinedButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              Navigator.pushNamed(context, '/subscription-settings');
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.primaryBlue,
+              side: BorderSide(color: AppTheme.primaryBlue, width: 2),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              '구독 관리 설정',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 16),
+        
+        Text(
+          '• 7일 무료 체험 후 자동으로 월간 구독이 시작됩니다\n• 체험 기간 중 언제든 Google Play에서 취소할 수 있습니다\n• 안전 모니터링 서비스 이용을 위해서는 구독이 필요합니다',
+          style: TextStyle(
+            fontSize: 11,
+            color: AppTheme.textLight,
+            height: 1.4,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
 }
+

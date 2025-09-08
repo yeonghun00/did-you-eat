@@ -3,6 +3,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../models/family_record.dart';
+import '../models/subscription_model.dart';
 
 class FirebaseService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -529,5 +530,207 @@ class FirebaseService {
   /// Get cached family ID without querying database
   static String? getCachedFamilyId(String connectionCode) {
     return _familyIdCache[connectionCode];
+  }
+
+  // ==================== SUBSCRIPTION METHODS ====================
+
+  /// Get user's subscription information from Firebase
+  static Future<SubscriptionInfo?> getSubscriptionInfo() async {
+    try {
+      final User? currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('❌ No authenticated user for subscription info');
+        return null;
+      }
+
+      print('📱 Getting subscription info for user: ${currentUser.uid}');
+
+      final DocumentSnapshot doc = await _firestore
+          .collection('subscriptions')
+          .doc(currentUser.uid)
+          .get();
+
+      if (!doc.exists || doc.data() == null) {
+        print('ℹ️ No subscription document found for user');
+        return SubscriptionInfo.defaultState();
+      }
+
+      final Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+      print('✅ Subscription data loaded: ${data['status']}');
+      
+      return SubscriptionInfo.fromFirestore(data);
+    } catch (e) {
+      print('❌ Error getting subscription info: $e');
+      return null;
+    }
+  }
+
+  /// Save user's subscription information to Firebase
+  static Future<bool> saveSubscriptionInfo(SubscriptionInfo subscriptionInfo) async {
+    try {
+      final User? currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('❌ No authenticated user for saving subscription');
+        return false;
+      }
+
+      print('💾 Saving subscription info for user: ${currentUser.uid}');
+      print('   Status: ${subscriptionInfo.status}');
+      print('   Can use premium: ${subscriptionInfo.canUsePremiumFeatures}');
+
+      await _firestore
+          .collection('subscriptions')
+          .doc(currentUser.uid)
+          .set(subscriptionInfo.toFirestore(), SetOptions(merge: true));
+
+      print('✅ Subscription info saved successfully');
+      return true;
+    } catch (e) {
+      print('❌ Error saving subscription info: $e');
+      return false;
+    }
+  }
+
+  /// Log subscription-related events for analytics and debugging
+  static Future<void> logSubscriptionEvent(SubscriptionEvent event) async {
+    try {
+      final User? currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('❌ No authenticated user for logging subscription event');
+        return;
+      }
+
+      print('📝 Logging subscription event: ${event.eventType}');
+
+      await _firestore
+          .collection('subscriptions')
+          .doc(currentUser.uid)
+          .collection('events')
+          .add(event.toFirestore());
+
+      print('✅ Subscription event logged: ${event.eventType}');
+    } catch (e) {
+      print('❌ Error logging subscription event: $e');
+    }
+  }
+
+  /// Get subscription events for the user (for analytics)
+  static Future<List<SubscriptionEvent>> getSubscriptionEvents({
+    int limit = 30,
+  }) async {
+    try {
+      final User? currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('❌ No authenticated user for getting subscription events');
+        return [];
+      }
+
+      final QuerySnapshot snapshot = await _firestore
+          .collection('subscriptions')
+          .doc(currentUser.uid)
+          .collection('events')
+          .orderBy('timestamp', descending: true)
+          .limit(limit)
+          .get();
+
+      return snapshot.docs
+          .map((doc) => SubscriptionEvent.fromFirestore(doc.data() as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('❌ Error getting subscription events: $e');
+      return [];
+    }
+  }
+
+  /// Get subscription statistics (admin function)
+  static Future<Map<String, int>> getSubscriptionStats() async {
+    try {
+      print('📊 Getting subscription statistics...');
+
+      final QuerySnapshot snapshot = await _firestore
+          .collection('subscriptions')
+          .get();
+
+      Map<String, int> stats = {
+        'total': 0,
+        'neverSubscribed': 0,
+        'freeTrial': 0,
+        'active': 0,
+        'expired': 0,
+        'cancelled': 0,
+        'pending': 0,
+      };
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final status = data['status'] ?? 'neverSubscribed';
+        
+        stats['total'] = stats['total']! + 1;
+        stats[status] = (stats[status] ?? 0) + 1;
+      }
+
+      print('✅ Subscription stats compiled: $stats');
+      return stats;
+    } catch (e) {
+      print('❌ Error getting subscription stats: $e');
+      return {};
+    }
+  }
+
+  /// Stream subscription information for real-time updates
+  static Stream<SubscriptionInfo?> getSubscriptionStream() {
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      return Stream.value(null);
+    }
+
+    return _firestore
+        .collection('subscriptions')
+        .doc(currentUser.uid)
+        .snapshots()
+        .map((doc) {
+          if (!doc.exists || doc.data() == null) {
+            return SubscriptionInfo.defaultState();
+          }
+          return SubscriptionInfo.fromFirestore(doc.data() as Map<String, dynamic>);
+        });
+  }
+
+  /// Quick premium check without full subscription info (optimized for frequent calls)
+  static Future<bool> quickPremiumCheck() async {
+    try {
+      final User? currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) return false;
+
+      final DocumentSnapshot doc = await _firestore
+          .collection('subscriptions')
+          .doc(currentUser.uid)
+          .get();
+
+      if (!doc.exists) return false;
+
+      final data = doc.data() as Map<String, dynamic>;
+      final status = data['status'];
+      
+      // Quick check for active statuses
+      if (status == 'active' || status == 'freeTrial') {
+        // Additional check for expiry dates
+        final expiryDateString = status == 'freeTrial' 
+            ? data['trialEndDate'] 
+            : data['expiryDate'];
+        
+        if (expiryDateString != null) {
+          final expiryDate = DateTime.parse(expiryDateString);
+          return DateTime.now().isBefore(expiryDate);
+        }
+        
+        return status == 'active'; // If no expiry date, assume active is valid
+      }
+
+      return false;
+    } catch (e) {
+      print('❌ Error in quick premium check: $e');
+      return false;
+    }
   }
 }
