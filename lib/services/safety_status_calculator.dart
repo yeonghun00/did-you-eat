@@ -133,59 +133,54 @@ class SafetyStatusCalculator {
   /// 마지막 활동 시간 파싱
   /// 
   /// 다양한 데이터 소스에서 마지막 활동 시간을 추출:
-  /// 1. lastPhoneActivity (일반적인 휴대폰 사용)
+  /// 1. lastPhoneActivity (최우선 - 실제 폰 사용 활동)
   /// 2. lastActive (앱 특정 활동)
   /// 3. lastMealTime (식사 기록)
+  /// 4. location (위치 정보는 보조 지표로만 사용)
   DateTime? _parseLastActivityTime(Map<String, dynamic> familyData) {
-    List<DateTime> activityTimes = [];
-
     try {
-      // 1. 휴대폰 일반 활동 시간
+      // 1. 휴대폰 일반 활동 시간 (최우선 - 실제 사용자 활동을 나타냄)
       final lastPhoneActivity = familyData['lastPhoneActivity'] ?? 
                                familyData['blastPhoneActivity'];
       if (lastPhoneActivity != null) {
         final phoneTime = _parseTimestamp(lastPhoneActivity);
         if (phoneTime != null) {
-          activityTimes.add(phoneTime);
+          secureLog.debug('Using lastPhoneActivity as primary activity indicator: $phoneTime');
+          return phoneTime;
         }
       }
 
-      // 2. 앱 특정 활동 시간
+      // 2. 앱 특정 활동 시간 (두 번째 우선순위)
       final lastActive = familyData['lastActive'];
       if (lastActive != null) {
         final activeTime = _parseTimestamp(lastActive);
         if (activeTime != null) {
-          activityTimes.add(activeTime);
+          secureLog.debug('Using lastActive as activity indicator: $activeTime');
+          return activeTime;
         }
       }
 
-      // 3. 최근 식사 시간 (lastMeal 구조에서)
+      // 3. 최근 식사 시간 (세 번째 우선순위)
       final lastMeal = familyData['lastMeal'] as Map<String, dynamic>?;
       if (lastMeal != null) {
         final mealTimestamp = lastMeal['timestamp'];
         if (mealTimestamp != null) {
           final mealTime = _parseTimestamp(mealTimestamp);
           if (mealTime != null) {
-            activityTimes.add(mealTime);
+            secureLog.debug('Using lastMealTime as activity indicator: $mealTime');
+            return mealTime;
           }
         }
       }
 
-      // 4. 위치 정보 업데이트 시간
+      // 4. 위치 정보 업데이트 시간 (최후 수단 - GPS는 자동 업데이트될 수 있음)
       final location = familyData['location'] as Map<String, dynamic>?;
       if (location != null && location['timestamp'] != null) {
         final locationTime = _parseTimestamp(location['timestamp']);
         if (locationTime != null) {
-          activityTimes.add(locationTime);
+          secureLog.debug('Using location timestamp as fallback activity indicator: $locationTime');
+          return locationTime;
         }
-      }
-
-      // 가장 최근 활동 시간 반환
-      if (activityTimes.isNotEmpty) {
-        activityTimes.sort((a, b) => b.compareTo(a)); // 최신순 정렬
-        final latestActivity = activityTimes.first;
-        secureLog.debug('Latest activity found: $latestActivity');
-        return latestActivity;
       }
 
       secureLog.warning('No valid activity timestamps found in family data');
