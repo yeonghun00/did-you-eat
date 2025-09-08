@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import '../services/child_app_service.dart';
 import '../services/safety_status_calculator.dart';
@@ -7,7 +6,7 @@ import '../constants/colors.dart';
 import '../theme/app_theme.dart';
 
 /// SafetyStatusWidget - 부모님의 안전 상태를 실시간으로 모니터링하고 표시하는 위젯
-/// 
+///
 /// 기능:
 /// - 녹색(안전), 주황색(주의), 빨간색(위험) 상태 표시
 /// - 설정된 알림 시간(3, 6, 12, 24시간 또는 사용자 정의)에 따른 상태 계산
@@ -17,10 +16,7 @@ import '../theme/app_theme.dart';
 class SafetyStatusWidget extends StatefulWidget {
   final String familyCode;
 
-  const SafetyStatusWidget({
-    Key? key,
-    required this.familyCode,
-  }) : super(key: key);
+  const SafetyStatusWidget({super.key, required this.familyCode});
 
   @override
   State<SafetyStatusWidget> createState() => _SafetyStatusWidgetState();
@@ -29,7 +25,7 @@ class SafetyStatusWidget extends StatefulWidget {
 class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
   final ChildAppService _childService = ChildAppService();
   final SafetyStatusCalculator _statusCalculator = SafetyStatusCalculator();
-  
+
   Timer? _statusUpdateTimer;
   StreamSubscription? _survivalStatusSubscription;
   SafetyStatus? _currentStatus;
@@ -56,25 +52,25 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
     _survivalStatusSubscription = _childService
         .listenToSurvivalStatus(widget.familyCode)
         .listen(
-      (data) {
-        if (mounted) {
-          setState(() {
-            _familyData = data;
-            _isLoading = false;
-            _error = null;
-          });
-          _updateSafetyStatus();
-        }
-      },
-      onError: (error) {
-        if (mounted) {
-          setState(() {
-            _error = error.toString();
-            _isLoading = false;
-          });
-        }
-      },
-    );
+          (data) {
+            if (mounted) {
+              setState(() {
+                _familyData = data;
+                _isLoading = false;
+                _error = null;
+              });
+              _updateSafetyStatus();
+            }
+          },
+          onError: (error) {
+            if (mounted) {
+              setState(() {
+                _error = error.toString();
+                _isLoading = false;
+              });
+            }
+          },
+        );
 
     // 1분마다 상태 업데이트 (시간 경과에 따른 상태 변화 반영)
     _statusUpdateTimer = Timer.periodic(
@@ -89,13 +85,13 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
 
     final newStatus = _statusCalculator.calculateSafetyStatus(_familyData!);
     final previousStatus = _currentStatus;
-    
+
     setState(() {
       _currentStatus = newStatus;
     });
 
     // 상태가 위험으로 변경되었을 때 알림 처리
-    if (previousStatus != null && 
+    if (previousStatus != null &&
         previousStatus.level != SafetyLevel.critical &&
         newStatus.level == SafetyLevel.critical) {
       _handleCriticalStatusAlert();
@@ -107,8 +103,10 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
     try {
       // FCM을 통한 푸시 알림은 Firebase Functions에서 자동으로 처리됨
       // 여기서는 로컬 UI 상태만 관리
-      print('🚨 Critical safety status detected - notifications handled by Firebase Functions');
-      
+      print(
+        '🚨 Critical safety status detected - notifications handled by Firebase Functions',
+      );
+
       // 로컬 알림 표시 (선택사항)
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -116,7 +114,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
             content: Text(
               '${_familyData?['elderlyName'] ?? '부모님'}의 안전 상태가 위험 단계입니다.',
             ),
-            backgroundColor: AppColors.warningRed,
+            backgroundColor: AppTheme.errorRed,
             duration: const Duration(seconds: 5),
             action: SnackBarAction(
               label: '확인',
@@ -184,17 +182,13 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.warningRed.withOpacity(0.3), width: 2),
+        border: Border.all(color: AppTheme.errorRed.withOpacity(0.3), width: 2),
         boxShadow: AppTheme.getCardShadow(elevation: 2),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.error_outline,
-            size: 48,
-            color: AppColors.warningRed,
-          ),
+          Icon(Icons.error_outline, size: 48, color: AppTheme.errorRed),
           const SizedBox(height: 12),
           const Text(
             '안전 상태를 불러올 수 없습니다',
@@ -207,10 +201,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
           const SizedBox(height: 8),
           Text(
             '네트워크 연결을 확인해주세요',
-            style: TextStyle(
-              fontSize: 14,
-              color: AppTheme.textMedium,
-            ),
+            style: TextStyle(fontSize: 14, color: AppTheme.textMedium),
           ),
           const SizedBox(height: 16),
           ElevatedButton.icon(
@@ -246,11 +237,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.info_outline,
-            size: 48,
-            color: AppTheme.textMedium,
-          ),
+          Icon(Icons.info_outline, size: 48, color: AppTheme.textMedium),
           const SizedBox(height: 12),
           const Text(
             '안전 상태 정보가 없습니다',
@@ -263,10 +250,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
           const SizedBox(height: 8),
           Text(
             '부모님 앱에서 활동 데이터를 확인해주세요',
-            style: TextStyle(
-              fontSize: 14,
-              color: AppTheme.textMedium,
-            ),
+            style: TextStyle(fontSize: 14, color: AppTheme.textMedium),
             textAlign: TextAlign.center,
           ),
         ],
@@ -326,7 +310,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: _getStatusColor(status.level).withOpacity(0.2),
+            color: _getStatusColor(status.level).withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(16),
           ),
           child: Icon(
@@ -360,35 +344,6 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
             ],
           ),
         ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
-              const Text(
-                'LIVE',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -396,55 +351,39 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
   /// 상태 인디케이터
   Widget _buildStatusIndicator(SafetyStatus status) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.95),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
+            blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: _getStatusColor(status.level),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  status.message,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: _getStatusColor(status.level),
-                  ),
-                ),
-              ),
-            ],
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: _getStatusColor(status.level),
+              shape: BoxShape.circle,
+            ),
           ),
-          if (status.description != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              status.description!,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              status.message,
               style: TextStyle(
-                fontSize: 14,
-                color: AppTheme.textMedium,
-                height: 1.4,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: _getStatusColor(status.level),
               ),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -458,62 +397,46 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
         color: Colors.white.withOpacity(0.95),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          if (status.lastActivityTime != null) ...[
-            Row(
+          Icon(
+            status.level == SafetyLevel.critical
+                ? Icons.warning
+                : Icons.schedule,
+            size: 18,
+            color: AppTheme.textMedium,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.access_time, size: 16, color: AppTheme.textMedium),
-                const SizedBox(width: 8),
                 Text(
-                  '마지막 활동',
+                  status.level == SafetyLevel.critical
+                      ? '활동 없음'
+                      : status.level == SafetyLevel.warning
+                      ? '알림까지'
+                      : '마지막 활동',
                   style: TextStyle(
                     fontSize: 14,
                     color: AppTheme.textMedium,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _formatTimestamp(status.lastActivityTime!),
-              style: const TextStyle(
-                fontSize: 16,
-                color: AppTheme.textDark,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-          Row(
-            children: [
-              Icon(
-                status.level == SafetyLevel.critical ? Icons.warning : Icons.schedule,
-                size: 16,
-                color: AppTheme.textMedium,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                status.level == SafetyLevel.critical ? '위험 상태 지속 시간' : '다음 단계까지',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppTheme.textMedium,
-                  fontWeight: FontWeight.w500,
+                const SizedBox(height: 2),
+                Text(
+                  status.level == SafetyLevel.critical
+                      ? _formatDuration(status.timeSinceLastActivity)
+                      : status.level == SafetyLevel.warning
+                      ? _formatDuration(status.timeUntilNextLevel)
+                      : _formatDuration(status.timeSinceLastActivity),
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: _getStatusColor(status.level),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            status.level == SafetyLevel.critical 
-                ? _formatDuration(status.timeSinceLastActivity)
-                : _formatDuration(status.timeUntilNextLevel),
-            style: TextStyle(
-              fontSize: 16,
-              color: _getStatusColor(status.level),
-              fontWeight: FontWeight.w600,
+              ],
             ),
           ),
         ],
@@ -549,7 +472,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
                   icon: const Icon(Icons.check_circle, size: 18),
                   label: const Text('안전 확인'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.normalGreen,
+                    backgroundColor: AppTheme.successGreen,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
@@ -629,7 +552,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('안전 확인에 실패했습니다.'),
-            backgroundColor: AppColors.warningRed,
+            backgroundColor: AppTheme.errorRed,
           ),
         );
       }
@@ -639,36 +562,33 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
   /// 부모님 연락하기 (향후 구현)
   void _contactParent() {
     // TODO: 전화걸기 기능 구현
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('연락하기 기능은 곧 추가될 예정입니다.'),
-      ),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('연락하기 기능은 곧 추가될 예정입니다.')));
   }
 
   /// 상태별 색상 반환
   Color _getStatusColor(SafetyLevel level) {
     switch (level) {
       case SafetyLevel.safe:
-        return AppColors.normalGreen;
+        return AppTheme.successGreen;
       case SafetyLevel.warning:
-        return AppColors.cautionOrange;
+        return AppTheme.warningAmber;
       case SafetyLevel.critical:
-        return AppColors.warningRed;
+        return AppTheme.errorRed;
     }
   }
 
   /// 상태별 그라데이션 반환
   LinearGradient _getStatusGradient(SafetyLevel level) {
-    final color = _getStatusColor(level);
-    return LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [
-        color.withOpacity(0.8),
-        color.withOpacity(0.6),
-      ],
-    );
+    switch (level) {
+      case SafetyLevel.safe:
+        return AppTheme.successGradient;
+      case SafetyLevel.warning:
+        return AppTheme.warningGradient;
+      case SafetyLevel.critical:
+        return AppTheme.errorGradient;
+    }
   }
 
   /// 상태별 아이콘 반환
@@ -704,24 +624,6 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
         return '곧 알림 시간에 도달합니다';
       case SafetyLevel.critical:
         return '즉시 확인이 필요합니다';
-    }
-  }
-
-  /// 타임스탬프 포맷팅
-  String _formatTimestamp(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-
-    if (difference.inMinutes < 1) {
-      return '방금 전';
-    } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}분 전';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}시간 ${difference.inMinutes % 60}분 전';
-    } else {
-      return '${dateTime.month}월 ${dateTime.day}일 '
-             '${dateTime.hour.toString().padLeft(2, '0')}:'
-             '${dateTime.minute.toString().padLeft(2, '0')}';
     }
   }
 

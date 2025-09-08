@@ -23,7 +23,7 @@ class AppTheme {
   // ================== STATUS COLORS ==================
 
   // Clear status indicators for quick scanning
-  static const Color successGreen = Color(0xFF10B981); // Parent is okay
+  static const Color successGreen = Color(0xFF11DE9A); // Parent is okay
   static const Color warningAmber = Color(0xFFF59E0B); // Needs attention
   static const Color errorRed = Color(0xFFEF4444); // Urgent situation
   static const Color infoTeal = Color(0xFF06B6D4); // Information
@@ -94,12 +94,10 @@ class AppTheme {
         primary: primaryBlue,
         secondary: infoTeal,
         surface: white,
-        background: gray50,
         error: errorRed,
         onPrimary: textOnColor,
         onSecondary: textOnColor,
         onSurface: textDark,
-        onBackground: textDark,
         onError: textOnColor,
       ),
 
@@ -123,7 +121,7 @@ class AppTheme {
       // Card theme - Clean with subtle shadows
       cardTheme: CardThemeData(
         color: white,
-        shadowColor: textLight.withOpacity(0.1),
+        shadowColor: textLight.withValues(alpha: 0.1),
         elevation: 2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         surfaceTintColor: Colors.transparent,
@@ -312,31 +310,11 @@ class AppTheme {
     }
   }
 
-  /// Get semantic color for specific UI elements
-  static Color getSemanticColor(String semantic) {
-    switch (semantic) {
-      case 'success':
-        return successGreen;
-      case 'warning':
-        return warningAmber;
-      case 'error':
-        return errorRed;
-      case 'info':
-        return infoTeal;
-      case 'primary':
-        return primaryBlue;
-      case 'secondary':
-        return gray200;
-      default:
-        return primaryBlue;
-    }
-  }
-
   /// Create professional shadow for cards
   static List<BoxShadow> getCardShadow({double elevation = 2}) {
     return [
       BoxShadow(
-        color: textLight.withOpacity(0.08),
+        color: textLight.withValues(alpha: 0.08),
         blurRadius: elevation * 4,
         offset: Offset(0, elevation),
         spreadRadius: 0,
@@ -376,9 +354,9 @@ class AppTheme {
         return 'Emergency';
     }
   }
-  
+
   // ================== NAVIGATION TRANSITIONS ==================
-  
+
   /// Standard slide transition for consistent navigation
   static PageRouteBuilder<T> slideTransition<T extends Object?>({
     required Widget page,
@@ -391,125 +369,29 @@ class AppTheme {
       transitionDuration: const Duration(milliseconds: 300),
       reverseTransitionDuration: const Duration(milliseconds: 300),
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        final begin = rightToLeft ? const Offset(1.0, 0.0) : const Offset(0.0, 1.0);
+        final begin = rightToLeft
+            ? const Offset(1.0, 0.0)
+            : const Offset(0.0, 1.0);
         final end = Offset.zero;
-        
+
         final slideTween = Tween(begin: begin, end: end);
-        final slideAnimation = animation.drive(slideTween.chain(
-          CurveTween(curve: Curves.easeInOut),
-        ));
-        
+        final slideAnimation = animation.drive(
+          slideTween.chain(CurveTween(curve: Curves.easeInOut)),
+        );
+
         // Add fade transition for smoothness
         final fadeAnimation = animation.drive(
-          Tween(begin: 0.0, end: 1.0).chain(
-            CurveTween(curve: Curves.easeInOut),
-          ),
+          Tween(
+            begin: 0.0,
+            end: 1.0,
+          ).chain(CurveTween(curve: Curves.easeInOut)),
         );
-        
+
         return SlideTransition(
           position: slideAnimation,
-          child: FadeTransition(
-            opacity: fadeAnimation,
-            child: child,
-          ),
+          child: FadeTransition(opacity: fadeAnimation, child: child),
         );
       },
     );
   }
-  
-  /// Fade transition for modal-like screens
-  static PageRouteBuilder<T> fadeTransition<T extends Object?>({
-    required Widget page,
-    RouteSettings? settings,
-  }) {
-    return PageRouteBuilder<T>(
-      settings: settings,
-      pageBuilder: (context, animation, secondaryAnimation) => page,
-      transitionDuration: const Duration(milliseconds: 200),
-      reverseTransitionDuration: const Duration(milliseconds: 200),
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        return FadeTransition(
-          opacity: animation.drive(
-            Tween(begin: 0.0, end: 1.0).chain(
-              CurveTween(curve: Curves.easeInOut),
-            ),
-          ),
-          child: child,
-        );
-      },
-    );
-  }
-  
-  /// Scale transition for important actions
-  static PageRouteBuilder<T> scaleTransition<T extends Object?>({
-    required Widget page,
-    RouteSettings? settings,
-  }) {
-    return PageRouteBuilder<T>(
-      settings: settings,
-      pageBuilder: (context, animation, secondaryAnimation) => page,
-      transitionDuration: const Duration(milliseconds: 300),
-      reverseTransitionDuration: const Duration(milliseconds: 300),
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        final scaleAnimation = animation.drive(
-          Tween(begin: 0.8, end: 1.0).chain(
-            CurveTween(curve: Curves.easeOutBack),
-          ),
-        );
-        
-        final fadeAnimation = animation.drive(
-          Tween(begin: 0.0, end: 1.0).chain(
-            CurveTween(curve: Curves.easeInOut),
-          ),
-        );
-        
-        return ScaleTransition(
-          scale: scaleAnimation,
-          child: FadeTransition(
-            opacity: fadeAnimation,
-            child: child,
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// Professional color palette for specific use cases
-class BusinessColors {
-  // Chart colors for analytics
-  static const Color chartPrimary = AppTheme.primaryBlue;
-  static const Color chartSecondary = AppTheme.infoTeal;
-  static const Color chartTertiary = AppTheme.warningAmber;
-
-  // Background variants
-  static const Color backgroundPrimary = AppTheme.white;
-  static const Color backgroundSecondary = AppTheme.gray50;
-  static const Color backgroundTertiary = AppTheme.gray100;
-
-  // Interactive states
-  static const Color hover = Color(0xFFF1F5F9);
-  static const Color pressed = Color(0xFFE2E8F0);
-  static const Color selected = Color(0xFFEFF6FF);
-  static const Color disabled = Color(0xFFF8FAFC);
-}
-
-/// Theme extensions for cleaner code
-extension AppThemeExtension on BuildContext {
-  /// Get the current theme
-  ThemeData get theme => Theme.of(this);
-
-  /// Get the current color scheme
-  ColorScheme get colors => theme.colorScheme;
-
-  /// Get the current text theme
-  TextTheme get textTheme => theme.textTheme;
-
-  /// Quick access to common colors
-  Color get primaryColor => AppTheme.primaryBlue;
-  Color get backgroundColor => AppTheme.gray50;
-  Color get cardColor => AppTheme.white;
-  Color get textColor => AppTheme.textDark;
-  Color get subtitleColor => AppTheme.textMedium;
-  Color get captionColor => AppTheme.textLight;
 }

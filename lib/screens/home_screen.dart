@@ -7,7 +7,6 @@ import '../models/family_record.dart';
 import '../services/firebase_service.dart';
 import '../services/child_app_service.dart';
 import '../widgets/today_meal_section.dart';
-import '../widgets/survival_monitor_widget.dart';
 import '../widgets/safety_status_widget.dart';
 import '../widgets/location_card_widget.dart';
 import '../services/safety_notification_service.dart';
@@ -311,12 +310,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     position: _slideAnimation,
                     child: Column(
                       children: [
-                        // 안전 상태 모니터링 (새로운 디자인)
+                        // 안전 상태 모니터링
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 400),
-                          child: SurvivalMonitorWidget(
+                          child: SafetyStatusWidget(
                             familyCode: widget.familyCode,
-                            showLegacyDesign: true,
                           ),
                         ),
 
