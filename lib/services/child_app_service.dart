@@ -549,7 +549,7 @@ class ChildAppService {
   }
 
   /// Clear survival alert after family acknowledges
-  /// Now uses secure family lookup
+  /// Now uses secure family lookup and updates lastPhoneActivity to current time
   Future<bool> clearSurvivalAlert(String connectionCode) async {
     try {
       // Use the new secure getFamilyInfo method
@@ -567,6 +567,8 @@ class ChildAppService {
         'alerts.survival': null, // Clear survival alert (optimized structure)
         'alertsCleared.survival': FieldValue.serverTimestamp(),
         'alertsClearedBy.survival': currentUser?.uid ?? 'Child App',
+        'lastPhoneActivity': FieldValue.serverTimestamp(), // Update lastPhoneActivity to current time
+        'blastPhoneActivity': FieldValue.serverTimestamp(), // Also update blastPhoneActivity for compatibility
       });
       return true;
     } catch (e) {

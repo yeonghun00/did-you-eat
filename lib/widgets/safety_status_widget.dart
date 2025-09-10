@@ -153,7 +153,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
           _showMandatorySubscriptionPopup(context);
         }
       });
-      
+
       // 로딩 상태를 유지하여 사용자가 실제 콘텐츠를 보지 못하게 함
       return _buildLoadingWidget();
     }
@@ -306,10 +306,6 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
             _buildStatusIndicator(status),
             const SizedBox(height: 20),
             _buildTimeInformation(status),
-            if (status.level == SafetyLevel.critical) ...[
-              const SizedBox(height: 16),
-              _buildCriticalActionButtons(),
-            ],
             const SizedBox(height: 16),
             _buildInfoSection(status),
           ],
@@ -330,7 +326,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
           ),
           child: Icon(
             _getStatusIcon(status.level),
-            color: _getStatusColor(status.level),
+            color: _getIconColor(status.level),
             size: 28,
           ),
         ),
@@ -412,108 +408,71 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
         color: Colors.white.withOpacity(0.95),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
-        children: [
-          Icon(
-            status.level == SafetyLevel.critical
-                ? Icons.warning
-                : Icons.schedule,
-            size: 18,
-            color: AppTheme.textMedium,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  status.level == SafetyLevel.critical
-                      ? '활동 없음'
-                      : status.level == SafetyLevel.warning
-                      ? '알림까지'
-                      : '마지막 활동',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppTheme.textMedium,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  status.level == SafetyLevel.critical
-                      ? _formatDuration(status.timeSinceLastActivity)
-                      : status.level == SafetyLevel.warning
-                      ? _formatDuration(status.timeUntilNextLevel)
-                      : _formatDuration(status.timeSinceLastActivity),
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: _getStatusColor(status.level),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 위험 상태 액션 버튼들
-  Widget _buildCriticalActionButtons() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
-        borderRadius: BorderRadius.circular(12),
-      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '긴급 조치 필요',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.textDark,
-            ),
-          ),
-          const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _clearSurvivalAlert,
-                  icon: const Icon(Icons.check_circle, size: 18),
-                  label: const Text('안전 확인'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.successGreen,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
+              Icon(
+                status.level == SafetyLevel.critical
+                    ? Icons.warning
+                    : Icons.schedule,
+                size: 18,
+                color: AppTheme.textMedium,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _contactParent,
-                  icon: const Icon(Icons.phone, size: 18),
-                  label: const Text('연락하기'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.primaryBlue,
-                    side: BorderSide(color: AppTheme.primaryBlue, width: 2),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      status.level == SafetyLevel.critical
+                          ? '활동 없음'
+                          : status.level == SafetyLevel.warning
+                          ? '알림까지'
+                          : '마지막 활동',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.textMedium,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      status.level == SafetyLevel.critical
+                          ? _formatDuration(status.timeSinceLastActivity)
+                          : status.level == SafetyLevel.warning
+                          ? _formatDuration(status.timeUntilNextLevel)
+                          : _formatDuration(status.timeSinceLastActivity),
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: _getStatusColor(status.level),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
+          if (status.level == SafetyLevel.critical) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _clearSurvivalAlert,
+                icon: const Icon(Icons.check_circle, size: 18),
+                label: const Text('안전 확인'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.successGreen,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -574,23 +533,27 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
     }
   }
 
-  /// 부모님 연락하기 (향후 구현)
-  void _contactParent() {
-    // TODO: 전화걸기 기능 구현
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('연락하기 기능은 곧 추가될 예정입니다.')));
-  }
-
   /// 상태별 색상 반환
   Color _getStatusColor(SafetyLevel level) {
     switch (level) {
       case SafetyLevel.safe:
-        return AppTheme.successGreen;
+        return const Color(0xFF00C853); // Brighter, more vibrant green
       case SafetyLevel.warning:
-        return AppTheme.warningAmber;
+        return const Color(0xFFFF8F00); // Vibrant orange for better visibility
       case SafetyLevel.critical:
-        return AppTheme.errorRed;
+        return const Color(0xFFE53E3E); // Stronger red for high contrast
+    }
+  }
+
+  /// 아이콘 전용 색상 반환 (배경과의 대비를 위해 별도 설정)
+  Color _getIconColor(SafetyLevel level) {
+    switch (level) {
+      case SafetyLevel.safe:
+        return const Color(0xFF2E7D0F); // Darker green for better contrast
+      case SafetyLevel.warning:
+        return const Color(0xFFE65100); // Darker orange for better visibility
+      case SafetyLevel.critical:
+        return const Color(0xFFB71C1C); // Darker red for high contrast
     }
   }
 
@@ -660,13 +623,13 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
   /// 필수 구독 팝업 표시
   void _showMandatorySubscriptionPopup(BuildContext context) {
     if (!mounted) return;
-    
+
     // 이미 팝업이 표시 중인지 확인
     final route = ModalRoute.of(context);
     if (route != null && !route.isCurrent) {
       return;
     }
-    
+
     showDialog<void>(
       context: context,
       barrierDismissible: false, // 바깥쪽 터치로 닫기 방지
@@ -697,7 +660,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
               children: [
                 // 헤더
                 _buildMandatoryPopupHeader(),
-                
+
                 // 컨텐츠 - 스크롤 가능
                 Flexible(
                   child: SingleChildScrollView(
@@ -708,19 +671,19 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
                         children: [
                           // 필수 안내 메시지
                           _buildMandatoryMessage(),
-                          
+
                           const SizedBox(height: 20),
-                          
+
                           // 프리미엄 기능 소개
                           _buildMandatoryFeaturesList(),
-                          
+
                           const SizedBox(height: 20),
-                          
+
                           // 가격 정보
                           _buildMandatoryPricingInfo(),
-                          
+
                           const SizedBox(height: 24),
-                          
+
                           // 액션 버튼들
                           _buildMandatoryActionButtons(dialogContext),
                         ],
@@ -735,17 +698,14 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       ),
     );
   }
-  
+
   Widget _buildMandatoryPopupHeader() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            AppTheme.errorRed,
-            AppTheme.errorRed.withOpacity(0.8),
-          ],
+          colors: [AppTheme.errorRed, AppTheme.errorRed.withOpacity(0.8)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -762,11 +722,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
               color: Colors.white.withOpacity(0.2),
               shape: BoxShape.circle,
             ),
-            child: const Icon(
-              Icons.security,
-              color: Colors.white,
-              size: 32,
-            ),
+            child: const Icon(Icons.security, color: Colors.white, size: 32),
           ),
           const SizedBox(height: 16),
           const Text(
@@ -792,7 +748,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       ),
     );
   }
-  
+
   Widget _buildMandatoryMessage() {
     return Container(
       width: double.infinity,
@@ -800,10 +756,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       decoration: BoxDecoration(
         color: AppTheme.errorRed.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AppTheme.errorRed.withOpacity(0.3),
-          width: 1,
-        ),
+        border: Border.all(color: AppTheme.errorRed.withOpacity(0.3), width: 1),
       ),
       child: Row(
         children: [
@@ -848,13 +801,25 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       ),
     );
   }
-  
+
   Widget _buildMandatoryFeaturesList() {
     const features = [
-      {'icon': Icons.emergency, 'title': '위험 상황 즉시 알림', 'desc': '부모님에게 응급상황 발생 시 실시간 알림'},
-      {'icon': Icons.shield, 'title': '24시간 안전 모니터링', 'desc': '부모님의 활동 상태를 지속적으로 확인'},
+      {
+        'icon': Icons.emergency,
+        'title': '위험 상황 즉시 알림',
+        'desc': '부모님에게 응급상황 발생 시 실시간 알림',
+      },
+      {
+        'icon': Icons.shield,
+        'title': '24시간 안전 모니터링',
+        'desc': '부모님의 활동 상태를 지속적으로 확인',
+      },
       {'icon': Icons.phone, 'title': '긴급 연락 기능', 'desc': '위험 감지 시 가족에게 자동 연락'},
-      {'icon': Icons.analytics, 'title': '상세 활동 분석', 'desc': '일상 패턴 분석으로 이상 징후 조기 발견'},
+      {
+        'icon': Icons.analytics,
+        'title': '상세 활동 분석',
+        'desc': '일상 패턴 분석으로 이상 징후 조기 발견',
+      },
     ];
 
     return Column(
@@ -869,53 +834,55 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
           ),
         ),
         const SizedBox(height: 12),
-        ...features.map((feature) => Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryBlue.withOpacity(0.1),
-                  shape: BoxShape.circle,
+        ...features.map(
+          (feature) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryBlue.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    feature['icon'] as IconData,
+                    color: AppTheme.primaryBlue,
+                    size: 20,
+                  ),
                 ),
-                child: Icon(
-                  feature['icon'] as IconData,
-                  color: AppTheme.primaryBlue,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      feature['title'] as String,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textDark,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        feature['title'] as String,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textDark,
+                        ),
                       ),
-                    ),
-                    Text(
-                      feature['desc'] as String,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.textMedium,
-                        height: 1.2,
+                      Text(
+                        feature['desc'] as String,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.textMedium,
+                          height: 1.2,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        )),
+        ),
       ],
     );
   }
-  
+
   Widget _buildMandatoryPricingInfo() {
     return Container(
       width: double.infinity,
@@ -968,10 +935,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
             children: [
               const Text(
                 '체험 후 월',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: AppTheme.textMedium,
-                ),
+                style: TextStyle(fontSize: 16, color: AppTheme.textMedium),
               ),
               const SizedBox(width: 4),
               const Text(
@@ -985,27 +949,21 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
               const SizedBox(width: 4),
               const Text(
                 '원',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: AppTheme.textMedium,
-                ),
+                style: TextStyle(fontSize: 16, color: AppTheme.textMedium),
               ),
             ],
           ),
           const SizedBox(height: 4),
           Text(
             '하루 단 50원 • 부모님 안전은 소중합니다',
-            style: TextStyle(
-              fontSize: 12,
-              color: AppTheme.textMedium,
-            ),
+            style: TextStyle(fontSize: 12, color: AppTheme.textMedium),
             textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
-  
+
   Widget _buildMandatoryActionButtons(BuildContext dialogContext) {
     return Column(
       children: [
@@ -1050,16 +1008,13 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
             ),
             child: const Text(
               '7일 무료 체험 시작하기',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
           ),
         ),
-        
+
         const SizedBox(height: 12),
-        
+
         // 구독 설정 바로가기 버튼
         SizedBox(
           width: double.infinity,
@@ -1078,16 +1033,13 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
             ),
             child: const Text(
               '구독 관리 설정',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
             ),
           ),
         ),
-        
+
         const SizedBox(height: 16),
-        
+
         Text(
           '• 7일 무료 체험 후 자동으로 월간 구독이 시작됩니다\n• 체험 기간 중 언제든 Google Play에서 취소할 수 있습니다\n• 안전 모니터링 서비스 이용을 위해서는 구독이 필요합니다',
           style: TextStyle(
@@ -1101,4 +1053,3 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
     );
   }
 }
-

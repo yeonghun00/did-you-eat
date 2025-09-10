@@ -48,8 +48,8 @@ class SafetyStatusCalculator {
   /// [familyData] - Firebase에서 가져온 가족 데이터
   /// 
   /// 상태 계산 로직:
-  /// - 녹색 (안전): 알림 시간 - 1시간 이전
-  /// - 주황색 (주의): 알림 시간 1시간 전 ~ 알림 시간
+  /// - 녹색 (안전): 알림 시간 - 50분 이전
+  /// - 주황색 (주의): 알림 시간 50분 전 ~ 알림 시간
   /// - 빨간색 (위험): 알림 시간 초과
   SafetyStatus calculateSafetyStatus(Map<String, dynamic> familyData) {
     try {
@@ -77,7 +77,7 @@ class SafetyStatusCalculator {
       
       // 임계값 계산 (분 단위)
       final alertThresholdMinutes = alertHours * 60;
-      final warningThresholdMinutes = alertThresholdMinutes - 60; // 1시간 전 경고
+      final warningThresholdMinutes = alertThresholdMinutes - 50; // 50분 전 경고
       
       // 현재 비활성 시간 (분 단위)
       final inactiveMinutes = timeSinceLastActivity.inMinutes;
@@ -95,7 +95,7 @@ class SafetyStatusCalculator {
           alertHours,
         );
       } else if (warningThresholdMinutes > 0 && inactiveMinutes >= warningThresholdMinutes) {
-        // 주황색 - 주의 필요 (1시간 전 경고)
+        // 주황색 - 주의 필요 (50분 전 경고)
         final timeUntilCritical = Duration(
           minutes: alertThresholdMinutes - inactiveMinutes,
         );
