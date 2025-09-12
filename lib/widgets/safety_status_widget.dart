@@ -705,7 +705,10 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [AppTheme.errorRed, AppTheme.errorRed.withOpacity(0.8)],
+          colors: [
+            const Color(0xFF4A90E2), // Soft, friendly blue
+            const Color(0xFF357ABD), // Slightly deeper blue
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -722,11 +725,11 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
               color: Colors.white.withOpacity(0.2),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.security, color: Colors.white, size: 32),
+            child: const Icon(Icons.favorite, color: Colors.white, size: 32),
           ),
           const SizedBox(height: 16),
           const Text(
-            '안전 모니터링 활성화 필요',
+            '더 나은 안전 보호를 시작하세요',
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
@@ -736,7 +739,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
           ),
           const SizedBox(height: 4),
           const Text(
-            '부모님의 안전을 지키기 위해 프리미엄 기능이 필요합니다',
+            '부모님을 더 안전하게 지키는 프리미엄 기능을 경험해보세요',
             style: TextStyle(
               fontSize: 14,
               color: Colors.white,
@@ -754,21 +757,21 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.errorRed.withOpacity(0.1),
+        color: const Color(0xFF4A90E2).withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.errorRed.withOpacity(0.3), width: 1),
+        border: Border.all(color: const Color(0xFF4A90E2).withOpacity(0.3), width: 1),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: AppTheme.errorRed.withOpacity(0.2),
+              color: const Color(0xFF4A90E2).withOpacity(0.2),
               shape: BoxShape.circle,
             ),
             child: const Icon(
-              Icons.priority_high,
-              color: AppTheme.errorRed,
+              Icons.star,
+              color: Color(0xFF4A90E2),
               size: 20,
             ),
           ),
@@ -778,7 +781,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '필수 기능 활성화',
+                  '프리미엄 기능 체험하기',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -787,7 +790,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
                 ),
                 SizedBox(height: 4),
                 Text(
-                  '실시간 안전 모니터링은 부모님의 생명과 직결된 중요한 기능입니다. 계속 사용하려면 구독이 필요합니다.',
+                  '부모님의 안전을 더욱 세심하게 지키는 고급 모니터링 기능을 무료로 체험해보세요. 7일간 모든 기능을 사용할 수 있습니다.',
                   style: TextStyle(
                     fontSize: 13,
                     color: AppTheme.textMedium,
@@ -805,20 +808,24 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
   Widget _buildMandatoryFeaturesList() {
     const features = [
       {
-        'icon': Icons.emergency,
-        'title': '위험 상황 즉시 알림',
-        'desc': '부모님에게 응급상황 발생 시 실시간 알림',
+        'icon': Icons.phone_android,
+        'title': '휴대폰 활동 모니터링',
+        'desc': '설정한 시간 동안 부모님이 휴대폰을 사용하지 않으면 알림',
       },
       {
         'icon': Icons.shield,
         'title': '24시간 안전 모니터링',
         'desc': '부모님의 활동 상태를 지속적으로 확인',
       },
-      {'icon': Icons.phone, 'title': '긴급 연락 기능', 'desc': '위험 감지 시 가족에게 자동 연락'},
       {
-        'icon': Icons.analytics,
-        'title': '상세 활동 분석',
-        'desc': '일상 패턴 분석으로 이상 징후 조기 발견',
+        'icon': Icons.location_on,
+        'title': 'GPS 위치 확인',
+        'desc': '부모님이 허용한 경우 실시간 위치 정보 확인 가능',
+      },
+      {
+        'icon': Icons.restaurant,
+        'title': '식사 확인 기능',
+        'desc': '부모님이 맛있게 식사했는지 확인하세요',
       },
     ];
 
@@ -973,10 +980,12 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
           height: 50,
           child: ElevatedButton(
             onPressed: () async {
+              // Close popup immediately for better UX
+              Navigator.of(dialogContext).pop();
+              
               try {
                 final success = await _subscriptionManager.startFreeTrial();
                 if (success && mounted) {
-                  Navigator.of(dialogContext).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('무료 체험이 시작되었습니다! 이제 모든 기능을 사용할 수 있습니다.'),
@@ -986,6 +995,13 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
                   );
                   // 위젯을 다시 빌드하여 프리미엄 콘텐츠를 표시
                   setState(() {});
+                } else if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('무료 체험 시작에 실패했습니다. 다시 시도해주세요.'),
+                      backgroundColor: AppTheme.errorRed,
+                    ),
+                  );
                 }
               } catch (e) {
                 if (mounted) {
@@ -1041,7 +1057,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
         const SizedBox(height: 16),
 
         Text(
-          '• 7일 무료 체험 후 자동으로 월간 구독이 시작됩니다\n• 체험 기간 중 언제든 Google Play에서 취소할 수 있습니다\n• 안전 모니터링 서비스 이용을 위해서는 구독이 필요합니다',
+          '• 7일 무료 체험을 통해 모든 프리미엄 기능을 경험해보세요\n• 체험 기간 중 언제든지 Google Play에서 쉽게 취소 가능합니다\n• 부모님의 안전을 위한 고급 모니터링을 시작해보세요',
           style: TextStyle(
             fontSize: 11,
             color: AppTheme.textLight,
