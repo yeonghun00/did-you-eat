@@ -75,9 +75,13 @@ dependencies:
   
   # Logging
   logger: ^2.6.0
-  
+
   # In-App Purchase for subscription
   in_app_purchase: ^3.2.3
+
+  # Encryption for location data
+  encrypt: ^5.0.3
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:

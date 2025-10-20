@@ -6,16 +6,20 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'auth_service.dart';
 import '../utils/secure_logger.dart';
+import 'encryption_service.dart';
 
 class ChildAppService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final AuthService _authService = AuthService();
-  
+
   // Connection tracking
   final Map<String, StreamSubscription> _activeListeners = {};
   bool _isConnected = false;
   DateTime? _lastSuccessfulOperation;
+
+  // Encryption key cache (familyId -> derived key)
+  final Map<String, String> _encryptionKeyCache = {};
 
   /// Ensure authentication with proper error handling and recovery
   Future<bool> _ensureAuthenticated() async {
@@ -112,6 +116,85 @@ class ChildAppService {
       }
     }
     return null;
+  }
+
+  /// Get or derive encryption key for a family
+  ///
+  /// Derives the key from familyId and caches it for future use
+  /// [familyId] The family identifier
+  /// Returns base64-encoded encryption key
+  String _getEncryptionKey(String familyId) {
+    // Check cache first
+    if (_encryptionKeyCache.containsKey(familyId)) {
+      return _encryptionKeyCache[familyId]!;
+    }
+
+    // Derive key from familyId
+    secureLog.debug('Deriving encryption key for familyId: $familyId');
+    final key = EncryptionService.deriveEncryptionKey(familyId);
+
+    // Cache the key
+    _encryptionKeyCache[familyId] = key;
+    secureLog.debug('Encryption key derived and cached');
+
+    return key;
+  }
+
+  /// Decrypt location data from Firestore
+  ///
+  /// [locationData] The location data map from Firestore
+  /// [familyId] The family identifier for key derivation
+  ///
+  /// Returns decrypted location data or null if:
+  /// - Location data is null/empty
+  /// - Location data is not encrypted (backward compatibility)
+  /// - Decryption fails
+  Map<String, dynamic>? _decryptLocationData(
+    Map<String, dynamic>? locationData,
+    String familyId,
+  ) {
+    if (locationData == null || locationData.isEmpty) {
+      return null;
+    }
+
+    // Check if location data is encrypted
+    final encrypted = locationData['encrypted'] as String?;
+    final iv = locationData['iv'] as String?;
+
+    if (encrypted != null && iv != null) {
+      // Location data is encrypted - decrypt it
+      try {
+        secureLog.debug('Decrypting location data for familyId: $familyId');
+        final key = _getEncryptionKey(familyId);
+
+        final decrypted = EncryptionService.decryptLocation(
+          encryptedData: encrypted,
+          ivBase64: iv,
+          base64Key: key,
+        );
+
+        // Add timestamp if present
+        if (locationData.containsKey('timestamp')) {
+          decrypted['timestamp'] = locationData['timestamp'];
+        }
+
+        secureLog.debug('Location data decrypted successfully');
+        return decrypted;
+      } catch (e) {
+        secureLog.error('Failed to decrypt location data', e);
+        return null;
+      }
+    } else {
+      // Location data is not encrypted (backward compatibility)
+      // Return as-is if it has latitude/longitude
+      if (locationData.containsKey('latitude') &&
+          locationData.containsKey('longitude')) {
+        secureLog.debug('Location data is not encrypted - using plain data');
+        return locationData;
+      }
+
+      return null;
+    }
   }
 
   /// Validate and get family information using connection code
@@ -463,6 +546,10 @@ class ChildAppService {
           'message': alerts?['survival'] != null ? '장시간 활동 없음' : null,
         };
 
+        // Decrypt location data if present
+        final rawLocationData = data['location'] as Map<String, dynamic>?;
+        final decryptedLocation = _decryptLocationData(rawLocationData, familyId);
+
         return {
           'lastMealTime': lastMealTime, // Last meal timestamp (optimized structure)
           'todayMealCount': todayMealCount, // Today's meal count (optimized structure)
@@ -470,7 +557,7 @@ class ChildAppService {
           'lastPhoneActivity': data['blastPhoneActivity'] ?? data['lastPhoneActivity'], // General phone activity (fix field name)
           'lastActive': data['lastActive'], // Our specific app usage
           'elderlyName': data['elderlyName'],
-          'location': data['location'], // Location data
+          'location': decryptedLocation, // Decrypted location data
         };
       }
       return null;
@@ -527,6 +614,10 @@ class ChildAppService {
             'message': alerts?['survival'] != null ? '장시간 활동 없음' : null,
           };
           
+          // Decrypt location data if present
+          final rawLocationData = data['location'] as Map<String, dynamic>?;
+          final decryptedLocation = _decryptLocationData(rawLocationData, familyId);
+
           yield {
             'lastMealTime': lastMealTime, // Last meal timestamp (optimized structure)
             'todayMealCount': todayMealCount, // Today's meal count (optimized structure)
@@ -535,7 +626,7 @@ class ChildAppService {
             'lastActive': data['lastActive'], // Our specific app usage
             'elderlyName': data['elderlyName'],
             'settings': data['settings'], // App settings
-            'location': data['location'], // Location data
+            'location': decryptedLocation, // Decrypted location data
           };
         } else {
           secureLog.warning('Family document deleted');
@@ -777,7 +868,8 @@ class ChildAppService {
       subscription.cancel();
     }
     _activeListeners.clear();
-    secureLog.info('ChildAppService disposed - all listeners cancelled');
+    _encryptionKeyCache.clear(); // Clear cached encryption keys
+    secureLog.info('ChildAppService disposed - all listeners cancelled and encryption keys cleared');
   }
   
   /// Get connection status
