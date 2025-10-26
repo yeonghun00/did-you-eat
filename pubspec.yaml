@@ -51,21 +51,14 @@ dependencies:
   
   # Image handling
   cached_network_image: ^3.3.0
-  
-  # Charts for analytics
-  fl_chart: ^0.68.0
-  
+
   # Maps (Free - OpenStreetMap)
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
   
   # URL launcher for external maps
   url_launcher: ^6.2.5
-  
-  # Location services
-  geolocator: ^12.0.0
-  geocoding: ^3.0.0
-  
+
   # Authentication
   google_sign_in: ^6.2.1
   sign_in_with_apple: ^6.1.0
