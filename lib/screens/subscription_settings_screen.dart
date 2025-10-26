@@ -167,7 +167,7 @@ class _SubscriptionSettingsScreenState extends State<SubscriptionSettingsScreen>
               Text('2. 프로필 아이콘 터치'),
               Text('3. "결제 및 정기결제" 선택'),
               Text('4. "정기결제" 선택'),
-              Text('5. "Love Everyday" 앱 찾기'),
+              Text('5. "식사하셨어요?" 앱 찾기'),
               Text('6. "정기결제 해지" 선택'),
               SizedBox(height: 12),
               Text(
