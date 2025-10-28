@@ -667,6 +667,119 @@ class AuthService {
         return '인증 오류가 발생했습니다: ${e.message}';
     }
   }
+
+  // ============================================================================
+  // FAMILY CONNECTION RESTORATION (Fix for reinstall issue)
+  // ============================================================================
+
+  /// Find user's existing family connection from Firestore
+  ///
+  /// This fixes the critical issue where users lose family connection
+  /// after app reinstall or update. When app is deleted, SharedPreferences
+  /// is cleared, but Firestore data persists.
+  ///
+  /// Returns: Map with 'familyId' and 'connectionCode', or null if not found
+  Future<Map<String, String>?> findExistingFamilyConnection() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        secureLog.warning('Cannot find family connection: No authenticated user');
+        return null;
+      }
+
+      secureLog.info('🔍 Searching for existing family connection for user: ${user.uid}');
+
+      // Query families where this user is a member
+      // This works because we add user.uid to memberIds array when they join
+      final querySnapshot = await _firestore
+          .collection('families')
+          .where('memberIds', arrayContains: user.uid)
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isEmpty) {
+        secureLog.info('❌ No existing family connection found for user');
+        return null;
+      }
+
+      final familyDoc = querySnapshot.docs.first;
+      final familyData = familyDoc.data();
+
+      final familyId = familyDoc.id;
+      final connectionCode = familyData['connectionCode'] as String?;
+      final elderlyName = familyData['elderlyName'] as String?;
+
+      if (connectionCode == null) {
+        secureLog.warning('⚠️ Family found but missing connection code');
+        return null;
+      }
+
+      secureLog.operationSuccess('✅ Found existing family connection!');
+      secureLog.info('   Family ID: $familyId');
+      secureLog.info('   Connection Code: $connectionCode');
+      secureLog.info('   Elderly Name: $elderlyName');
+
+      return {
+        'familyId': familyId,
+        'connectionCode': connectionCode,
+      };
+    } catch (e) {
+      secureLog.error('❌ Error finding existing family connection', e);
+      return null;
+    }
+  }
+
+  /// Save connection code to SharedPreferences
+  ///
+  /// Stores the connection code locally for fast access on next app launch.
+  /// This is cleared when app is deleted, which is why we also need
+  /// findExistingFamilyConnection() as a fallback.
+  Future<void> saveConnectionCode(String connectionCode) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('connectionCode', connectionCode);
+      await prefs.setString('familyCode', connectionCode); // Backward compatibility
+      secureLog.info('✅ Connection code saved to SharedPreferences: $connectionCode');
+    } catch (e) {
+      secureLog.error('❌ Failed to save connection code', e);
+    }
+  }
+
+  /// Get stored connection code from SharedPreferences
+  ///
+  /// Returns the locally stored connection code, or null if not found.
+  /// This is the fast path - if it exists, we don't need to query Firestore.
+  Future<String?> getStoredConnectionCode() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final code = prefs.getString('connectionCode') ?? prefs.getString('familyCode');
+
+      if (code != null) {
+        secureLog.info('✅ Found connection code in SharedPreferences: $code');
+      } else {
+        secureLog.info('❌ No connection code found in SharedPreferences');
+      }
+
+      return code;
+    } catch (e) {
+      secureLog.error('❌ Failed to get stored connection code', e);
+      return null;
+    }
+  }
+
+  /// Clear stored connection code from SharedPreferences
+  ///
+  /// Used when user logs out or leaves a family.
+  Future<void> clearStoredConnectionCode() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('connectionCode');
+      await prefs.remove('familyCode');
+      secureLog.info('✅ Connection code cleared from SharedPreferences');
+    } catch (e) {
+      secureLog.error('❌ Failed to clear connection code', e);
+    }
+  }
 }
 
 // Result wrapper class for better error handling

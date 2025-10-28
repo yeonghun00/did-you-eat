@@ -487,7 +487,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           ),
                         ),
 
-
                         // 위치 지도 카드
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 400),

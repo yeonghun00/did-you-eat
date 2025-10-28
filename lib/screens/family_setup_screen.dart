@@ -28,12 +28,12 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
     super.initState();
     _initializeAuth();
   }
-  
+
   Future<void> _initializeAuth() async {
     // Ensure authentication is properly set up
     try {
       await _authService.initialize();
-      
+
       // Ensure we have some form of authentication for Firebase access
       final currentUser = _authService.currentUser;
       if (currentUser == null) {
@@ -47,8 +47,145 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
       } else {
         print('✅ User already authenticated: ${currentUser.uid}');
       }
+
+      // CRITICAL FIX: Check for existing family connection
+      // This fixes the reinstall issue where connection is lost
+      await _checkExistingConnection();
     } catch (e) {
       print('❌ Authentication initialization failed: $e');
+    }
+  }
+
+  /// Check for existing family connection (fixes reinstall issue)
+  ///
+  /// This method implements a two-step recovery process:
+  /// 1. Fast path: Check SharedPreferences (local storage)
+  /// 2. Slow path: Query Firestore (survives reinstall)
+  ///
+  /// If a connection is found, automatically restore it and navigate to home.
+  Future<void> _checkExistingConnection() async {
+    print('🔍 Checking for existing family connection...');
+
+    try {
+      // Step 1: Check SharedPreferences (fast path)
+      final connectionCode = await _authService.getStoredConnectionCode();
+
+      if (connectionCode != null) {
+        print('✅ Found connection code in SharedPreferences: $connectionCode');
+        await _validateAndProceed(connectionCode);
+        return;
+      }
+
+      // Step 2: Check Firestore (reinstall recovery)
+      print('❌ No connection code in SharedPreferences');
+      print('🔍 Checking Firestore for existing family connection...');
+
+      final existingConnection = await _authService.findExistingFamilyConnection();
+
+      if (existingConnection != null) {
+        final restoredCode = existingConnection['connectionCode']!;
+        print('🎉 RESTORED connection from Firestore: $restoredCode');
+
+        // Show success message to user
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('가족 연결을 복원했습니다! 🎉'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+
+        // Save to SharedPreferences for next time (fast path)
+        await _authService.saveConnectionCode(restoredCode);
+
+        // Proceed to home screen
+        await _validateAndProceed(restoredCode);
+        return;
+      }
+
+      print('❌ No existing family connection found in Firestore');
+      print('👉 User needs to enter connection code');
+    } catch (e) {
+      print('❌ Error checking existing connection: $e');
+      // Don't block user - they can still enter code manually
+    }
+  }
+
+  /// Validate connection code and proceed to home screen
+  ///
+  /// This is used both for new connections and restored connections.
+  Future<void> _validateAndProceed(String code) async {
+    try {
+      print('🔍 Validating connection code: $code');
+
+      final familyData = await _childService.getFamilyInfo(code);
+
+      if (familyData == null || familyData.isEmpty) {
+        print('❌ Invalid connection code: $code');
+        if (mounted) {
+          setState(() {
+            _errorMessage = '유효하지 않은 가족 코드입니다';
+          });
+        }
+        return;
+      }
+
+      // Check if approved
+      final approved = familyData['approved'] as bool? ?? false;
+
+      if (!approved) {
+        print('⚠️ Family connection not yet approved');
+        if (mounted) {
+          setState(() {
+            _errorMessage = '아직 승인되지 않은 연결입니다';
+          });
+        }
+        return;
+      }
+
+      print('✅ Connection validated, navigating to home screen');
+
+      // Create FamilyInfo object
+      final familyInfo = FamilyInfo.fromMap({
+        'familyCode': code,
+        'elderlyName': familyData['elderlyName'] ?? 'Unknown',
+        'createdAt': familyData['createdAt'],
+        'lastMealTime': familyData['lastMealTime'],
+        'isActive': true,
+        'deviceInfo': '',
+      });
+
+      // Register FCM token for notifications
+      try {
+        final familyId = familyData['familyId'] as String?;
+        if (familyId != null) {
+          await FCMTokenService.registerChildToken(familyId);
+          print('✅ FCM token registered for family: $familyId');
+        }
+      } catch (e) {
+        print('⚠️ FCM token registration failed: $e');
+      }
+
+      // Navigate to home screen
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => HomeScreen(
+              familyCode: code,
+              familyInfo: familyInfo,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error validating and proceeding: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = '연결 확인 중 오류가 발생했습니다';
+        });
+      }
     }
   }
 

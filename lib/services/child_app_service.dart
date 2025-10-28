@@ -558,6 +558,10 @@ class ChildAppService {
           'lastActive': data['lastActive'], // Our specific app usage
           'elderlyName': data['elderlyName'],
           'location': decryptedLocation, // Decrypted location data
+          'batteryLevel': data['batteryLevel'] as int?, // Battery percentage (0-100)
+          'isCharging': data['isCharging'] as bool?, // Charging status
+          'batteryTimestamp': data['batteryTimestamp'], // When battery was read
+          'batteryHealth': data['batteryHealth'] as String?, // Battery health status
         };
       }
       return null;
@@ -627,6 +631,10 @@ class ChildAppService {
             'elderlyName': data['elderlyName'],
             'settings': data['settings'], // App settings
             'location': decryptedLocation, // Decrypted location data
+            'batteryLevel': data['batteryLevel'] as int?, // Battery percentage (0-100)
+            'isCharging': data['isCharging'] as bool?, // Charging status
+            'batteryTimestamp': data['batteryTimestamp'], // When battery was read
+            'batteryHealth': data['batteryHealth'] as String?, // Battery health status
           };
         } else {
           secureLog.warning('Family document deleted');

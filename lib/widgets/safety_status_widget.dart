@@ -3,7 +3,6 @@ import 'dart:async';
 import '../services/child_app_service.dart';
 import '../services/safety_status_calculator.dart';
 import '../services/subscription_manager.dart';
-import '../constants/colors.dart';
 import '../theme/app_theme.dart';
 
 /// SafetyStatusWidget - 부모님의 안전 상태를 실시간으로 모니터링하고 표시하는 위젯
@@ -478,35 +477,74 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
     );
   }
 
-  /// 정보 섹션
+  /// 정보 섹션 (배터리 상태)
   Widget _buildInfoSection(SafetyStatus status) {
+    // Get battery info from family data
+    final batteryLevel = _familyData?['batteryLevel'] as int?;
+    final isCharging = _familyData?['isCharging'] as bool? ?? false;
+
+    // Don't show section if no battery data
+    if (batteryLevel == null) {
+      return const SizedBox.shrink();
+    }
+
+    final batteryText = _getBatteryText(batteryLevel, isCharging);
+    final batteryColor = _getBatteryColor(batteryLevel, isCharging);
+
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(8),
+        color: Colors.white.withOpacity(0.95),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.info_outline,
-            size: 16,
-            color: Colors.white.withOpacity(0.8),
+            isCharging ? Icons.battery_charging_full : Icons.battery_std,
+            size: 20,
+            color: batteryColor,
           ),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '알림 설정: ${status.alertHours}시간 • ${_getStatusExplanation(status.level)}',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.white.withOpacity(0.9),
-                height: 1.3,
-              ),
+          Text(
+            batteryText,
+            style: TextStyle(
+              fontSize: 14,
+              color: batteryColor,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// Get battery text for display
+  String _getBatteryText(int batteryLevel, bool isCharging) {
+    if (isCharging) {
+      return '배터리 $batteryLevel% 충전 중';
+    } else if (batteryLevel >= 50) {
+      return '배터리 $batteryLevel%';
+    } else if (batteryLevel >= 20) {
+      return '배터리 $batteryLevel%';
+    } else if (batteryLevel >= 10) {
+      return '배터리 부족 $batteryLevel%';
+    } else {
+      return '배터리 위험 $batteryLevel%';
+    }
+  }
+
+  /// Get battery color based on level and charging status
+  Color _getBatteryColor(int batteryLevel, bool isCharging) {
+    if (isCharging) {
+      return AppTheme.primaryBlue;
+    } else if (batteryLevel >= 50) {
+      return AppTheme.successGreen;
+    } else if (batteryLevel >= 20) {
+      return AppTheme.warningAmber;
+    } else {
+      return AppTheme.errorRed;
+    }
   }
 
   /// 생존 알림 해제
@@ -578,18 +616,6 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
         return '주의 필요';
       case SafetyLevel.critical:
         return '긴급 상황';
-    }
-  }
-
-  /// 상태별 설명 반환
-  String _getStatusExplanation(SafetyLevel level) {
-    switch (level) {
-      case SafetyLevel.safe:
-        return '정상적으로 활동 중입니다';
-      case SafetyLevel.warning:
-        return '곧 알림 시간에 도달합니다';
-      case SafetyLevel.critical:
-        return '즉시 확인이 필요합니다';
     }
   }
 
