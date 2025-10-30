@@ -412,9 +412,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
           Row(
             children: [
               Icon(
-                status.level == SafetyLevel.critical
-                    ? Icons.warning
-                    : Icons.schedule,
+                Icons.schedule,
                 size: 18,
                 color: AppTheme.textMedium,
               ),
@@ -424,11 +422,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      status.level == SafetyLevel.critical
-                          ? '활동 없음'
-                          : status.level == SafetyLevel.warning
-                          ? '알림까지'
-                          : '마지막 활동',
+                      '마지막 활동',
                       style: TextStyle(
                         fontSize: 14,
                         color: AppTheme.textMedium,
@@ -437,11 +431,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      status.level == SafetyLevel.critical
-                          ? _formatDuration(status.timeSinceLastActivity)
-                          : status.level == SafetyLevel.warning
-                          ? _formatDuration(status.timeUntilNextLevel)
-                          : _formatDuration(status.timeSinceLastActivity),
+                      _formatDuration(status.timeSinceLastActivity),
                       style: TextStyle(
                         fontSize: 16,
                         color: _getStatusColor(status.level),
