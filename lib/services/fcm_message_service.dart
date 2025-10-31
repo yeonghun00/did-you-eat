@@ -21,7 +21,7 @@ class FCMMessageService {
   /// Initialize local notifications plugin
   static Future<void> _initializeLocalNotifications() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@drawable/ic_notification');
+        AndroidInitializationSettings('@mipmap/ic_launcher');
     
     const DarwinInitializationSettings initializationSettingsDarwin =
         DarwinInitializationSettings(
@@ -142,9 +142,24 @@ class FCMMessageService {
 
   /// Show local notification
   static Future<void> _showLocalNotification(RemoteMessage message) async {
+    // Don't show notification if there's no meaningful content
+    if (message.notification == null) {
+      print('⚠️ Skipping notification - no notification payload');
+      return;
+    }
+
+    final title = message.notification?.title;
+    final body = message.notification?.body;
+
+    // Skip if both title and body are empty
+    if ((title == null || title.isEmpty) && (body == null || body.isEmpty)) {
+      print('⚠️ Skipping empty notification');
+      return;
+    }
+
     final type = message.data['type'];
     String channelId = 'meal_notifications'; // default
-    
+
     // Set channel based on message type
     switch (type) {
       case 'meal_recorded':
@@ -169,7 +184,7 @@ class FCMMessageService {
       priority: Priority.high,
       enableVibration: true,
       playSound: true,
-      icon: '@drawable/ic_notification',
+      icon: '@mipmap/ic_launcher',
     );
     
     const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
@@ -182,11 +197,11 @@ class FCMMessageService {
       android: androidDetails,
       iOS: iosDetails,
     );
-    
+
     await _localNotifications.show(
       DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      message.notification?.title ?? '알림',
-      message.notification?.body ?? '',
+      title ?? '알림',
+      body ?? '',
       details,
       payload: message.data.toString(),
     );

@@ -33,6 +33,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
   Map<String, dynamic>? _familyData;
   bool _isLoading = true;
   String? _error;
+  bool _isInSleepMode = false;
 
   @override
   void initState() {
@@ -87,8 +88,12 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
     final newStatus = _statusCalculator.calculateSafetyStatus(_familyData!);
     final previousStatus = _currentStatus;
 
+    // Check if parent is currently in sleep mode
+    final isInSleep = _checkIfInSleepTime();
+
     setState(() {
       _currentStatus = newStatus;
+      _isInSleepMode = isInSleep;
     });
 
     // 상태가 위험으로 변경되었을 때 알림 처리
@@ -97,6 +102,79 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
         newStatus.level == SafetyLevel.critical) {
       _handleCriticalStatusAlert();
     }
+  }
+
+  /// Check if parent is currently in sleep time period
+  bool _checkIfInSleepTime() {
+    if (_familyData == null) return false;
+
+    try {
+      final settings = _familyData!['settings'] as Map<String, dynamic>?;
+      final sleepSettings = settings?['sleepTimeSettings'] as Map<String, dynamic>?;
+
+      if (sleepSettings == null) return false;
+
+      final enabled = sleepSettings['enabled'] as bool? ?? false;
+      if (!enabled) return false;
+
+      final sleepStartHour = sleepSettings['sleepStartHour'] as int? ?? 22;
+      final sleepStartMinute = sleepSettings['sleepStartMinute'] as int? ?? 0;
+      final sleepEndHour = sleepSettings['sleepEndHour'] as int? ?? 6;
+      final sleepEndMinute = sleepSettings['sleepEndMinute'] as int? ?? 0;
+
+      // Parse active days (1=Monday, 7=Sunday)
+      final activeDays = (sleepSettings['activeDays'] as List<dynamic>?)
+          ?.map((e) => e as int)
+          .toList() ?? [1, 2, 3, 4, 5, 6, 7];
+
+      final now = DateTime.now();
+      final currentWeekday = now.weekday; // 1=Monday, 7=Sunday
+
+      // Check if today is an active sleep day
+      if (!activeDays.contains(currentWeekday)) {
+        return false;
+      }
+
+      // Check if current time is within sleep period
+      final currentMinutes = now.hour * 60 + now.minute;
+      final sleepStartMinutes = sleepStartHour * 60 + sleepStartMinute;
+      final sleepEndMinutes = sleepEndHour * 60 + sleepEndMinute;
+
+      if (sleepStartMinutes > sleepEndMinutes) {
+        // Overnight period (e.g., 22:00 - 06:00)
+        return currentMinutes >= sleepStartMinutes || currentMinutes <= sleepEndMinutes;
+      } else {
+        // Same-day period (e.g., 14:00 - 16:00)
+        return currentMinutes >= sleepStartMinutes && currentMinutes <= sleepEndMinutes;
+      }
+    } catch (e) {
+      print('Error checking sleep time: $e');
+      return false;
+    }
+  }
+
+  /// Get sleep time period string for display (e.g., "22:00 - 06:00")
+  String _getSleepTimePeriod() {
+    try {
+      final settings = _familyData!['settings'] as Map<String, dynamic>?;
+      final sleepSettings = settings?['sleepTimeSettings'] as Map<String, dynamic>?;
+
+      if (sleepSettings == null) return '';
+
+      final sleepStartHour = sleepSettings['sleepStartHour'] as int? ?? 22;
+      final sleepStartMinute = sleepSettings['sleepStartMinute'] as int? ?? 0;
+      final sleepEndHour = sleepSettings['sleepEndHour'] as int? ?? 6;
+      final sleepEndMinute = sleepSettings['sleepEndMinute'] as int? ?? 0;
+
+      return '${_formatTime(sleepStartHour, sleepStartMinute)} - ${_formatTime(sleepEndHour, sleepEndMinute)}';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /// Format time as HH:MM
+  String _formatTime(int hour, int minute) {
+    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
   }
 
   /// 위험 상태 알림 처리
@@ -409,6 +487,50 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       ),
       child: Column(
         children: [
+          // Sleep mode indicator (if in sleep time)
+          if (_isInSleepMode) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppTheme.infoTeal.withOpacity(0.08),
+                    AppTheme.primaryBlue.withOpacity(0.05),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppTheme.infoTeal.withOpacity(0.2),
+                  width: 1.5,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '⏰ ${_getSleepTimePeriod()}',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textDark,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '부모님께서 수면시간이세요. 안전 알림이 일시 중지됩니다 💤',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textMedium,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           Row(
             children: [
               Icon(
@@ -434,7 +556,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
                       _formatDuration(status.timeSinceLastActivity),
                       style: TextStyle(
                         fontSize: 16,
-                        color: _getStatusColor(status.level),
+                        color: _isInSleepMode ? Colors.blue.shade700 : _getStatusColor(status.level),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -443,7 +565,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
               ),
             ],
           ),
-          if (status.level == SafetyLevel.critical) ...[
+          if (status.level == SafetyLevel.critical && !_isInSleepMode) ...[
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -472,6 +594,7 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
     // Get battery info from family data
     final batteryLevel = _familyData?['batteryLevel'] as int?;
     final isCharging = _familyData?['isCharging'] as bool? ?? false;
+    final hasLocation = _familyData?['location'] != null;
 
     // Don't show section if no battery data
     if (batteryLevel == null) {
@@ -481,31 +604,35 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
     final batteryText = _getBatteryText(batteryLevel, isCharging);
     final batteryColor = _getBatteryColor(batteryLevel, isCharging);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            isCharging ? Icons.battery_charging_full : Icons.battery_std,
-            size: 20,
-            color: batteryColor,
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.95),
+            borderRadius: BorderRadius.circular(12),
           ),
-          const SizedBox(width: 8),
-          Text(
-            batteryText,
-            style: TextStyle(
-              fontSize: 14,
-              color: batteryColor,
-              fontWeight: FontWeight.w600,
-            ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                isCharging ? Icons.battery_charging_full : Icons.battery_std,
+                size: 20,
+                color: batteryColor,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                batteryText,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: batteryColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
