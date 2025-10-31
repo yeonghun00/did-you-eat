@@ -479,6 +479,10 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
 
   /// 시간 정보 섹션
   Widget _buildTimeInformation(SafetyStatus status) {
+    // Check if survival signal monitoring is disabled
+    final settings = _familyData?['settings'] as Map<String, dynamic>?;
+    final survivalSignalEnabled = settings?['survivalSignalEnabled'] as bool? ?? true;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -487,6 +491,69 @@ class _SafetyStatusWidgetState extends State<SafetyStatusWidget> {
       ),
       child: Column(
         children: [
+          // Survival signal disabled indicator
+          if (!survivalSignalEnabled) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppTheme.warningAmber.withOpacity(0.12),
+                    AppTheme.warningAmber.withOpacity(0.06),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppTheme.warningAmber.withOpacity(0.3),
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.warningAmber.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.notifications_off,
+                      color: AppTheme.warningAmber,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '안전 확인 알림이 비활성화됨',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '부모님이 안전 확인 알림을 끄셨습니다',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.textMedium,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           // Sleep mode indicator (if in sleep time)
           if (_isInSleepMode) ...[
             Container(

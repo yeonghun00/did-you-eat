@@ -52,6 +52,99 @@ class _LocationCardWidgetState extends State<LocationCardWidget> {
         final location = data['location'] as Map<String, dynamic>?;
         final elderlyName = data['elderlyName'] as String? ?? '';
 
+        // Check if GPS tracking is disabled
+        final settings = data['settings'] as Map<String, dynamic>?;
+        final locationTrackingEnabled = settings?['locationTrackingEnabled'] as bool? ?? true;
+
+        // If GPS tracking is disabled, show disabled indicator
+        if (!locationTrackingEnabled) {
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  spreadRadius: 1,
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryBlue.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.location_off,
+                      size: 40,
+                      color: AppColors.primaryBlue,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'GPS 추적이 비활성화됨',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.darkText,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '부모님이 위치 공유를 끄셨습니다',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: AppColors.lightText,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (location != null && location['address'] != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.softGray,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.history,
+                            size: 16,
+                            color: AppColors.lightText,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              '마지막 위치: ${location['address']}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.lightText,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        }
+
         // If no location data, show placeholder
         if (location == null || 
             location['latitude'] == null || 
